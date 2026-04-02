@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jarvis stand-down: pause Spotify, quit apps, Focus off, restore wallpaper, clear session."""
+"""Jarvis stand-down: goodbye typing+voice, quit Spotify/apps, Focus off, restore wallpaper."""
 from __future__ import annotations
 
 import json
@@ -77,15 +77,6 @@ def main() -> int:
     restore_path = state / "wallpaper_restore.json"
     util = Path(__file__).resolve().parent / "wallpaper_util.py"
 
-    _spotify_pause()
-
-    for app in cfg.get("stand_down_apps_quit", ["Kiro", "Cursor", "Terminal"]):
-        _quit_app(app)
-
-    off_name = cfg.get("shortcut_focus_off", "")
-    if off_name:
-        subprocess.run(["shortcuts", "run", off_name], capture_output=True, text=True)
-
     hw = cfg.get("holographic_wallpaper", {})
     ack_msg = cfg.get("stand_down_ack_message", "Very good, sir")
     voice = cfg.get("say_voice", "")
@@ -94,17 +85,32 @@ def main() -> int:
         and hw.get("enabled", False)
         and hw.get("stand_down_ack", True)
     )
+
+    # Goodbye: same typing + voice + black as welcome, before tearing the lab down
     if holo_ack:
         scripts = Path(__file__).resolve().parent
         if str(scripts) not in sys.path:
             sys.path.insert(0, str(scripts))
-        from jarvis_holographic_wallpaper import apply_holographic_wallpaper
+        from jarvis_holographic_wallpaper import play_typing_wallpaper
 
         try:
-            apply_holographic_wallpaper(cfg, state, ack_msg)
+            play_typing_wallpaper(cfg, state, ack_msg, voice, end_with_black=False)
         except Exception as e:
-            print(f"Holographic stand-down wallpaper failed: {e}", file=sys.stderr)
-        _say(ack_msg, voice)
+            print(f"Stand-down typing wallpaper failed: {e}", file=sys.stderr)
+            if cfg.get("stand_down_ack_enabled", True):
+                _say(ack_msg, voice)
+
+    _spotify_pause()
+
+    apps = list(cfg.get("stand_down_apps_quit", ["Kiro", "Cursor", "Terminal"]))
+    if cfg.get("stand_down_quit_spotify", True) and "Spotify" not in apps:
+        apps.append("Spotify")
+    for app in apps:
+        _quit_app(app)
+
+    off_name = cfg.get("shortcut_focus_off", "")
+    if off_name:
+        subprocess.run(["shortcuts", "run", off_name], capture_output=True, text=True)
 
     if restore_path.is_file():
         try:

@@ -151,9 +151,20 @@ def main() -> int:
             pass
 
     welcome_text = cfg.get("welcome_message", "Welcome Home Sir")
+    voice = cfg.get("say_voice", "")
+    hw = cfg.get("holographic_wallpaper", {})
     try:
         _backup_wallpaper(state)
-        _set_lab_wallpaper(cfg, state, welcome_text)
+        if hw.get("enabled", False):
+            scripts = Path(__file__).resolve().parent
+            if str(scripts) not in sys.path:
+                sys.path.insert(0, str(scripts))
+            from jarvis_holographic_wallpaper import play_typing_wallpaper
+
+            play_typing_wallpaper(cfg, state, welcome_text, voice)
+        else:
+            _set_lab_wallpaper(cfg, state, welcome_text)
+            _say(welcome_text, voice)
     except Exception as e:
         print(f"Wallpaper step failed: {e}", file=sys.stderr)
         return 1
@@ -161,9 +172,6 @@ def main() -> int:
     on_name = cfg.get("shortcut_focus_on", "")
     if on_name:
         _shortcuts_run(on_name)
-
-    voice = cfg.get("say_voice", "")
-    _say(welcome_text, voice)
 
     uri = cfg.get("spotify_track_uri", "")
     sec = float(cfg.get("music_preview_seconds", 10))

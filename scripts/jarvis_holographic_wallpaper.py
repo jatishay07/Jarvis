@@ -5,9 +5,13 @@ Used so on-screen text matches whatever macOS `say` will speak.
 """
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
+import tempfile
 import textwrap
+import time
 from pathlib import Path
 
 
@@ -145,6 +149,128 @@ def render_holographic_png(
     out.save(out_path, "PNG", optimize=True)
 
 
+def render_black_png(out_path: Path, width: int, height: int) -> None:
+    try:
+        from PIL import Image
+    except ImportError as e:
+        raise RuntimeError("Install Pillow: pip install Pillow") from e
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (width, height), (0, 0, 0)).save(out_path, "PNG", optimize=True)
+
+
+def _wallpaper_set(util: Path, png: Path) -> None:
+    r = subprocess.run(
+        [sys.executable, str(util), "set", str(png)],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or "wallpaper set failed")
+
+
+def measure_say_duration_seconds(text: str, voice: str) -> float:
+    """Render speech to a temp AIFF and read duration with afinfo (macOS)."""
+    fallback = max(1.8, min(12.0, len(text) * 0.068))
+    fd, path = tempfile.mkstemp(suffix=".aiff", prefix="jarvis_say_")
+    os.close(fd)
+    try:
+        cmd = ["say", "-o", path]
+        if voice:
+            cmd.extend(["-v", voice])
+        cmd.append(text)
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            return fallback
+        info = subprocess.run(["afinfo", path], capture_output=True, text=True)
+        if info.returncode != 0:
+            return fallback
+        m = re.search(r"estimated duration:\s*([\d.]+)\s*sec", info.stdout, re.I)
+        if m:
+            return max(0.5, float(m.group(1)))
+        m = re.search(r"(\d+\.?\d*)\s*sec", info.stdout)
+        if m:
+            return max(0.5, float(m.group(1)))
+        return fallback
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def play_typing_wallpaper(
+    cfg: dict,
+    state: Path,
+    full_text: str,
+    voice: str,
+    *,
+    end_with_black: bool = True,
+) -> None:
+    """
+    Type holographic text in sync with `say` (duration from afinfo).
+    If end_with_black, replace with a black frame (welcome / mid-session).
+    If False, leave the final typed frame up (stand-down then restores wallpaper).
+    """
+    hw = cfg.get("holographic_wallpaper", {})
+    if not hw.get("enabled", False):
+        return
+
+    scripts_dir = Path(__file__).resolve().parent
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    sw, sh = screen_dimensions()
+    w = int(hw["width"]) if hw.get("width") is not None else sw
+    h = int(hw["height"]) if hw.get("height") is not None else sh
+    util = scripts_dir / "wallpaper_util.py"
+    frame_path = state / "holographic_wallpaper.png"
+    black_path = state / "holographic_black.png"
+
+    duration = measure_say_duration_seconds(full_text, voice)
+    show_cursor = bool(hw.get("typing_show_cursor", True))
+    cursor_char = str(hw.get("typing_cursor_char", "|"))
+
+    display = full_text.replace("\n", " ").strip()
+    if not display:
+        render_black_png(black_path, w, h)
+        _wallpaper_set(util, black_path)
+        return
+
+    n = len(display)
+    say_cmd = ["say"]
+    if voice:
+        say_cmd.extend(["-v", voice])
+    say_cmd.append(full_text)
+    proc = subprocess.Popen(say_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    t0 = time.perf_counter()
+    try:
+        for i in range(1, n + 1):
+            visible = display[:i]
+            if show_cursor and i < n:
+                visible = visible + cursor_char
+            render_holographic_png(visible, frame_path, w, h, hw)
+            _wallpaper_set(util, frame_path)
+            target = t0 + duration * (i / n)
+            delay = target - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
+        proc.wait(timeout=duration + 8.0)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    pause = float(hw.get("pause_after_typing_seconds", 0.12))
+    time.sleep(pause)
+    if end_with_black:
+        render_black_png(black_path, w, h)
+        _wallpaper_set(util, black_path)
+
+
 def apply_holographic_wallpaper(cfg: dict, state: Path, text: str) -> None:
     hw = cfg.get("holographic_wallpaper", {})
     if not hw.get("enabled", False):
@@ -157,13 +283,7 @@ def apply_holographic_wallpaper(cfg: dict, state: Path, text: str) -> None:
     out = state / "holographic_wallpaper.png"
     render_holographic_png(text, out, w, h, hw)
     util = Path(__file__).resolve().parent / "wallpaper_util.py"
-    r = subprocess.run(
-        [sys.executable, str(util), "set", str(out)],
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr.strip() or "wallpaper set failed")
+    _wallpaper_set(util, out)
 
 
 def main() -> int:

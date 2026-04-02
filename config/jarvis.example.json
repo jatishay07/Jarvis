@@ -9,11 +9,15 @@
   "holographic_wallpaper": {
     "enabled": true,
     "stand_down_ack": true,
+    "typing_show_cursor": true,
+    "typing_cursor_char": "|",
+    "pause_after_typing_seconds": 0.15,
     "width": null,
     "height": null,
     "font_scale": 0.072,
     "glow_blur": 14
   },
+  "stand_down_quit_spotify": true,
   "spotify_track_uri": "spotify:track:39shmbIHICJ2Wxnk1fPSdz",
   "music_preview_seconds": 10,
   "apps": {

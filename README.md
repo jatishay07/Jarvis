@@ -20,7 +20,8 @@ cp config/jarvis.example.json config/jarvis.json
 
 Edit `config/jarvis.json`:
 
-- **`holographic_wallpaper`**: when `"enabled": true` (default in the example), the “lab” wallpaper is **generated**: black background + blue/cyan **holographic-style text** that matches **`welcome_message`** right before `say`, and (if `stand_down_ack` is true) **`stand_down_ack_message`** before that line is spoken on stand-down. You do not need a custom image for that mode. Set `"enabled": false` to use a static file instead.
+- **`holographic_wallpaper`**: when `"enabled": true`, **welcome** and **stand-down** lines are shown as a **typewriter-style** holographic wallpaper in sync with **Samantha** (duration measured with `say` + `afinfo`), then the text is replaced by a **plain black** desktop for the rest of the lab session (welcome) or until your normal wallpaper is **restored** (stand-down). Options: `typing_show_cursor`, `typing_cursor_char`, `pause_after_typing_seconds`. Set `"enabled": false` to use a static `wallpaper_lab_image` and plain `say` instead.
+- **`stand_down_quit_spotify`**: when `true` (default), **Spotify** is **quit** on stand-down (after pause), along with `stand_down_apps_quit`.
 - **`wallpaper_lab_image`**: required only when holographic mode is **disabled**—absolute path to your lab image
 - **`holographic_wallpaper.font_scale` / `glow_blur`**: tweak size and glow strength; `width` / `height` default to your main screen size (`null` = auto)
 - **`welcome_message`** / **`stand_down_ack_message`**: these strings are what you **hear** and what is **drawn** on the holographic wallpaper
