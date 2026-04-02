@@ -50,6 +50,42 @@ def _font_candidates() -> list[Path]:
     ]
 
 
+def _load_font_at_size(size: int):
+    from PIL import ImageFont
+
+    for fp in _font_candidates():
+        if fp.is_file():
+            try:
+                return ImageFont.truetype(str(fp), size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def _subtitle_font_size_for_text(
+    full_text: str,
+    width: int,
+    height: int,
+    style: dict,
+) -> int:
+    """One-line subtitle: pick largest font so the full line fits (stable per-letter typing)."""
+    from PIL import ImageDraw
+
+    margin = int(width * float(style.get("subtitle_margin_x_ratio", 0.06)))
+    max_w = width - 2 * margin
+    start = max(
+        18,
+        int(min(width, height) * float(style.get("subtitle_font_scale", 0.042))),
+    )
+    dummy = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    for fs in range(start, 15, -2):
+        font = _load_font_at_size(fs)
+        bbox = dummy.textbbox((0, 0), full_text, font=font)
+        if bbox[2] - bbox[0] <= max_w:
+            return fs
+    return 16
+
+
 def render_holographic_png(
     text: str,
     out_path: Path,
@@ -63,35 +99,49 @@ def render_holographic_png(
         raise RuntimeError("Install Pillow: pip install Pillow") from e
 
     style = style or {}
-    font_scale = float(style.get("font_scale", 0.075))
+    layout = str(style.get("layout", "center"))
     glow_blur = int(style.get("glow_blur", 12))
     margin = int(width * 0.06)
 
     base = Image.new("RGB", (width, height), (0, 0, 0))
     rgba = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
-    font_size = max(24, int(min(width, height) * font_scale))
-    font = ImageFont.load_default()
-    for fp in _font_candidates():
-        if fp.is_file():
-            try:
-                font = ImageFont.truetype(str(fp), font_size)
-                break
-            except OSError:
+    if not text.strip():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        base.save(out_path, "PNG", optimize=True)
+        return
+
+    if layout == "subtitle":
+        full_ref = str(style.get("_subtitle_full_text", text))
+        fixed_px = style.get("_subtitle_fixed_font_px")
+        if fixed_px is not None:
+            font_size = int(fixed_px)
+        else:
+            font_size = _subtitle_font_size_for_text(full_ref, width, height, style)
+        font = _load_font_at_size(font_size)
+        margin_bottom = int(height * float(style.get("subtitle_margin_bottom_ratio", 0.14)))
+        lines = [text]  # one line; width already ensured using full_ref at play start
+    else:
+        font_scale = float(style.get("font_scale", 0.075))
+        font_size = max(24, int(min(width, height) * font_scale))
+        font = ImageFont.load_default()
+        for fp in _font_candidates():
+            if fp.is_file():
+                try:
+                    font = ImageFont.truetype(str(fp), font_size)
+                    break
+                except OSError:
+                    continue
+        avg_char = max(1, font_size // 2)
+        max_chars = max(12, (width - 2 * margin) // avg_char)
+        lines = []
+        for paragraph in text.split("\n"):
+            if not paragraph.strip():
+                lines.append("")
                 continue
-
-    # Wrap to fit width
-    avg_char = max(1, font_size // 2)
-    max_chars = max(12, (width - 2 * margin) // avg_char)
-    lines = []
-    for paragraph in text.split("\n"):
-        if not paragraph.strip():
-            lines.append("")
-            continue
-        lines.extend(textwrap.wrap(paragraph, width=max_chars) or [paragraph])
-
-    if not lines:
-        lines = [" "]
+            lines.extend(textwrap.wrap(paragraph, width=max_chars) or [paragraph])
+        if not lines:
+            lines = [" "]
 
     dummy = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     line_heights: list[int] = []
@@ -103,7 +153,10 @@ def render_holographic_png(
 
     line_gap = int(font_size * 0.25)
     total_h = sum(line_heights) + line_gap * (len(lines) - 1)
-    y0 = max(margin, (height - total_h) // 2)
+    if layout == "subtitle":
+        y0 = max(margin, height - margin_bottom - total_h)
+    else:
+        y0 = max(margin, (height - total_h) // 2)
 
     def draw_line_glow(d: ImageDraw.ImageDraw, x: int, y: int, line: str) -> None:
         glow_color = (40, 140, 255, 90)
@@ -159,13 +212,18 @@ def render_black_png(out_path: Path, width: int, height: int) -> None:
 
 
 def _wallpaper_set(util: Path, png: Path) -> None:
+    if not png.is_file():
+        raise RuntimeError(f"wallpaper PNG missing: {png}")
     r = subprocess.run(
         [sys.executable, str(util), "set", str(png)],
         capture_output=True,
         text=True,
     )
     if r.returncode != 0:
-        raise RuntimeError(r.stderr.strip() or "wallpaper set failed")
+        detail = (r.stderr or r.stdout or "").strip() or "wallpaper set failed"
+        raise RuntimeError(
+            f"{detail} (hint: grant Automation for Terminal/your runner to control System Events)"
+        )
 
 
 def measure_say_duration_seconds(text: str, voice: str) -> float:
@@ -207,9 +265,8 @@ def play_typing_wallpaper(
     end_with_black: bool = True,
 ) -> None:
     """
-    Type holographic text in sync with `say` (duration from afinfo).
-    If end_with_black, replace with a black frame (welcome / mid-session).
-    If False, leave the final typed frame up (stand-down then restores wallpaper).
+    Subtitle-style typing: one character at a time in sync with `say`, optional erase, then black.
+    `typing_layout`: "subtitle" (bottom, single line) or "center" (wrapped, legacy).
     """
     hw = cfg.get("holographic_wallpaper", {})
     if not hw.get("enabled", False):
@@ -229,12 +286,23 @@ def play_typing_wallpaper(
     duration = measure_say_duration_seconds(full_text, voice)
     show_cursor = bool(hw.get("typing_show_cursor", True))
     cursor_char = str(hw.get("typing_cursor_char", "|"))
+    layout = str(hw.get("typing_layout", "subtitle"))
+    min_per_char = float(hw.get("typing_min_seconds_per_char", 0.038))
+    erase_anim = bool(hw.get("subtitle_erase_animated", True))
+    erase_seconds = float(hw.get("subtitle_erase_seconds", 0.45))
 
     display = full_text.replace("\n", " ").strip()
     if not display:
         render_black_png(black_path, w, h)
         _wallpaper_set(util, black_path)
         return
+
+    frame_style: dict = dict(hw)
+    frame_style["layout"] = layout
+    if layout == "subtitle":
+        sub_px = _subtitle_font_size_for_text(display, w, h, hw)
+        frame_style["_subtitle_full_text"] = display
+        frame_style["_subtitle_fixed_font_px"] = sub_px
 
     n = len(display)
     say_cmd = ["say"]
@@ -249,9 +317,11 @@ def play_typing_wallpaper(
             visible = display[:i]
             if show_cursor and i < n:
                 visible = visible + cursor_char
-            render_holographic_png(visible, frame_path, w, h, hw)
+            render_holographic_png(visible, frame_path, w, h, frame_style)
             _wallpaper_set(util, frame_path)
-            target = t0 + duration * (i / n)
+            ideal = t0 + duration * (i / n)
+            min_time = t0 + min_per_char * i
+            target = max(ideal, min_time)
             delay = target - time.perf_counter()
             if delay > 0:
                 time.sleep(delay)
@@ -264,8 +334,28 @@ def play_typing_wallpaper(
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-    pause = float(hw.get("pause_after_typing_seconds", 0.12))
+    pause = float(hw.get("pause_after_typing_seconds", 0.18))
     time.sleep(pause)
+
+    # Full line without cursor (hold beat)
+    render_holographic_png(display, frame_path, w, h, frame_style)
+    _wallpaper_set(util, frame_path)
+    time.sleep(float(hw.get("subtitle_hold_full_seconds", 0.2)))
+
+    if erase_anim and n > 0:
+        per = erase_seconds / n
+        for j in range(n - 1, -1, -1):
+            visible = display[:j]
+            if show_cursor and j > 0:
+                visible = visible + cursor_char
+            elif not visible.strip():
+                render_black_png(black_path, w, h)
+                _wallpaper_set(util, black_path)
+                time.sleep(per)
+                continue
+            render_holographic_png(visible, frame_path, w, h, frame_style)
+            _wallpaper_set(util, frame_path)
+            time.sleep(per)
     if end_with_black:
         render_black_png(black_path, w, h)
         _wallpaper_set(util, black_path)
@@ -281,7 +371,9 @@ def apply_holographic_wallpaper(cfg: dict, state: Path, text: str) -> None:
     h = int(hw["height"]) if hw.get("height") is not None else sh
 
     out = state / "holographic_wallpaper.png"
-    render_holographic_png(text, out, w, h, hw)
+    static_style = dict(hw)
+    static_style["layout"] = "center"
+    render_holographic_png(text, out, w, h, static_style)
     util = Path(__file__).resolve().parent / "wallpaper_util.py"
     _wallpaper_set(util, out)
 

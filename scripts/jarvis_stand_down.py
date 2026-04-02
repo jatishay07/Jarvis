@@ -36,6 +36,28 @@ def _spotify_pause() -> None:
     subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
 
 
+def _stand_down_apps_to_quit(cfg: dict) -> list[str]:
+    """Merge config list with terminal and Spotify (deduped, order preserved)."""
+    raw = list(cfg.get("stand_down_apps_quit", ["Kiro", "Cursor"]))
+    out: list[str] = []
+    seen: set[str] = set()
+    for a in raw:
+        k = a.casefold()
+        if k not in seen:
+            seen.add(k)
+            out.append(a)
+    if cfg.get("stand_down_quit_terminal", True):
+        ta = cfg.get("terminal_app", "Terminal")
+        k = ta.casefold()
+        if k not in seen:
+            seen.add(k)
+            out.append(ta)
+    if cfg.get("stand_down_quit_spotify", True) and "spotify" not in seen:
+        out.append("Spotify")
+        seen.add("spotify")
+    return out
+
+
 def _quit_app(name: str) -> None:
     esc = name.replace("\\", "\\\\").replace('"', '\\"')
     script = f"""
@@ -62,6 +84,21 @@ def _say(text: str, voice: str) -> None:
     subprocess.run(cmd, check=False)
 
 
+def _restore_wallpaper(restore_path: Path, util: Path) -> None:
+    if not restore_path.is_file():
+        return
+    r = subprocess.run(
+        [sys.executable, str(util), "restore", str(restore_path)],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        print(
+            f"Warning: wallpaper restore failed: {r.stderr.strip() or r.stdout.strip()}",
+            file=sys.stderr,
+        )
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     cfg_path = Path(os.environ.get("JARVIS_CONFIG", root / "config" / "jarvis.json"))
@@ -86,7 +123,7 @@ def main() -> int:
         and hw.get("stand_down_ack", True)
     )
 
-    # Goodbye: same typing + voice + black as welcome, before tearing the lab down
+    # Goodbye: subtitle typing + erase + black (same pipeline as welcome), then restore wallpaper
     if holo_ack:
         scripts = Path(__file__).resolve().parent
         if str(scripts) not in sys.path:
@@ -94,17 +131,20 @@ def main() -> int:
         from jarvis_holographic_wallpaper import play_typing_wallpaper
 
         try:
-            play_typing_wallpaper(cfg, state, ack_msg, voice, end_with_black=False)
+            play_typing_wallpaper(cfg, state, ack_msg, voice, end_with_black=True)
         except Exception as e:
             print(f"Stand-down typing wallpaper failed: {e}", file=sys.stderr)
             if cfg.get("stand_down_ack_enabled", True):
                 _say(ack_msg, voice)
+        # Lab session used a black desktop; bring back the user's wallpaper for quit/Focus
+        _restore_wallpaper(restore_path, util)
+    else:
+        # No holo goodbye: still on black lab wallpaper — restore before pausing/quitting
+        _restore_wallpaper(restore_path, util)
 
     _spotify_pause()
 
-    apps = list(cfg.get("stand_down_apps_quit", ["Kiro", "Cursor", "Terminal"]))
-    if cfg.get("stand_down_quit_spotify", True) and "Spotify" not in apps:
-        apps.append("Spotify")
+    apps = _stand_down_apps_to_quit(cfg)
     for app in apps:
         _quit_app(app)
 
@@ -112,14 +152,8 @@ def main() -> int:
     if off_name:
         subprocess.run(["shortcuts", "run", off_name], capture_output=True, text=True)
 
-    if restore_path.is_file():
-        try:
-            subprocess.run(
-                [sys.executable, str(util), "restore", str(restore_path)],
-                check=False,
-            )
-        except OSError:
-            pass
+    # Second pass if the first restore failed, or Focus/quit altered desktop state
+    _restore_wallpaper(restore_path, util)
 
     if session_path.is_file():
         session_path.unlink()
