@@ -29,9 +29,11 @@
   "stand_down_apps_quit": ["Kiro", "Cursor", "Terminal", "iTerm", "iTerm2"],
   "state_dir": "~/.jarvis",
   "clap": {
+    "input_device": null,
     "sample_rate": 16000,
     "block_ms": 20,
     "peak_threshold": 0.12,
+    "calibrate_seconds": 1.2,
     "hysteresis": 0.5,
     "min_clap_gap_ms": 150,
     "max_clap_gap_ms": 900,
@@ -40,8 +42,12 @@
   },
   "lab_session_max_minutes": 240,
   "phrase": {
-    "chunk_seconds": 3.5,
-    "min_rms": 0.012,
+    "chunk_seconds": 4,
+    "overlap_seconds": 1.25,
+    "min_rms": 0.004,
+    "vad_filter": false,
+    "fuzzy_ratio": 0.62,
+    "debug": false,
     "whisper_model": "tiny.en",
     "compute_type": "int8"
   }

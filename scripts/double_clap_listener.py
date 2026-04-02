@@ -80,20 +80,39 @@ def _rms(x: np.ndarray) -> float:
 
 
 def run_welcome(cfg_path: Path) -> bool:
-    sh = Path(__file__).resolve().parent / "jarvis_welcome.sh"
+    """Use sys.executable so LaunchAgent's venv Python runs welcome (same deps as listener)."""
     env = os.environ.copy()
     env["JARVIS_CONFIG"] = str(cfg_path)
     root = _root()
-    r = subprocess.run(["/bin/bash", str(sh)], env=env, cwd=str(root))
+    script = Path(__file__).resolve().parent / "jarvis_welcome.py"
+    r = subprocess.run(
+        [sys.executable, str(script)],
+        env=env,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        err = (r.stderr or r.stdout or "").strip()
+        print(f"Welcome script failed ({r.returncode}): {err}", file=sys.stderr, flush=True)
     return r.returncode == 0
 
 
 def run_stand_down(cfg_path: Path) -> None:
-    sh = Path(__file__).resolve().parent / "jarvis_stand_down.sh"
     env = os.environ.copy()
     env["JARVIS_CONFIG"] = str(cfg_path)
     root = _root()
-    subprocess.run(["/bin/bash", str(sh)], env=env, cwd=str(root))
+    script = Path(__file__).resolve().parent / "jarvis_stand_down.py"
+    r = subprocess.run(
+        [sys.executable, str(script)],
+        env=env,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        err = (r.stderr or r.stdout or "").strip()
+        print(f"Stand-down script failed ({r.returncode}): {err}", file=sys.stderr, flush=True)
 
 
 class ClapDetector:
@@ -160,6 +179,56 @@ class ClapDetector:
             if crossed_up:
                 self._first_onset = now
         return False
+
+
+def _calibrate_clap_threshold(
+    clap: ClapDetector,
+    q: queue.Queue,
+    cfg: dict,
+) -> None:
+    cal_sec = float(cfg.get("clap", {}).get("calibrate_seconds", 1.2))
+    if cal_sec <= 0:
+        return
+    peaks: list[float] = []
+    deadline = time.time() + cal_sec
+    print(
+        f"[clap] Calibrating ({cal_sec}s) — stay quiet so we learn background noise…",
+        flush=True,
+    )
+    while time.time() < deadline:
+        try:
+            chunk = q.get(timeout=0.12)
+            peaks.append(float(np.max(np.abs(chunk))))
+        except queue.Empty:
+            continue
+    if not peaks:
+        return
+    arr = np.array(peaks, dtype=np.float64)
+    p20 = float(np.percentile(arr, 20))
+    p80 = float(np.percentile(arr, 80))
+    span = max(p80 - p20, 0.002)
+    adaptive = max(clap.peak_threshold, p20 + span * 3.0, p80 * 1.35)
+    adaptive = min(adaptive, 0.48)
+    if p80 < 1e-4:
+        print(
+            "[clap] WARNING: Input is nearly silent — allow Microphone for this Python in "
+            "System Settings (same binary as the listener / .venv/bin/python3).",
+            flush=True,
+        )
+        if not cfg.get("clap", {}).get("input_device"):
+            print(
+                "[clap] AirPods/Bluetooth often give silence for background apps. "
+                "System Settings → Sound → Input → choose your MacBook mic, or set "
+                "clap.input_device in jarvis.json (see scripts/list_audio_devices.py).",
+                flush=True,
+            )
+    orig_t = cfg.get("clap", {}).get("peak_threshold", 0.12)
+    print(
+        f"[clap] Noise band ~{p20:.3f}–{p80:.3f} → using peak_threshold={adaptive:.3f} "
+        f"(config base {orig_t})",
+        flush=True,
+    )
+    clap.peak_threshold = adaptive
 
 
 def _parse_argv() -> tuple[Path, bool] | None:
@@ -249,7 +318,35 @@ def run_watch(cfg_path: Path) -> int:
             time.sleep(1.5)
 
 
-def _print_audio_diagnostics(cfg: dict, sd) -> None:
+def _resolve_input_device(cfg: dict, sd) -> int | None:
+    """Optional clap.input_device: int index or substring of device name (case-insensitive)."""
+    raw = cfg.get("clap", {}).get("input_device")
+    if raw is None or raw == "":
+        return None
+    if raw is True or raw is False:
+        return None
+    if isinstance(raw, int):
+        return int(raw)
+    if isinstance(raw, float):
+        return int(raw)
+    needle = str(raw).strip().lower()
+    for i, d in enumerate(sd.query_devices()):
+        try:
+            if int(d.get("max_input_channels", 0)) < 1:
+                continue
+            if needle in d["name"].lower():
+                return i
+        except (KeyError, TypeError, ValueError):
+            continue
+    print(
+        f"[clap] input_device {raw!r} not found — using system default. "
+        "Run: python3 scripts/list_audio_devices.py",
+        flush=True,
+    )
+    return None
+
+
+def _print_audio_diagnostics(cfg: dict, sd, input_index: int | None) -> None:
     if _lab_active(cfg):
         sp = _session_path(cfg)
         print(
@@ -259,11 +356,11 @@ def _print_audio_diagnostics(cfg: dict, sd) -> None:
             flush=True,
         )
     try:
-        idx = sd.default.device[0]
+        idx = input_index if input_index is not None else sd.default.device[0]
         d = sd.query_devices(idx)
         print(f"Using microphone: {d['name']!r} (index {idx})", flush=True)
     except Exception as e:
-        print(f"Could not query default input device: {e}", flush=True)
+        print(f"Could not query input device: {e}", flush=True)
 
 
 def run_listener(cfg_path: Path) -> int:
@@ -281,14 +378,20 @@ def run_listener(cfg_path: Path) -> int:
     _last_debug_t = [0.0]
 
     phrase_cfg = cfg.get("phrase", {})
-    chunk_sec = float(phrase_cfg.get("chunk_seconds", 3.5))
-    min_rms = float(phrase_cfg.get("min_rms", 0.012))
+    chunk_sec = float(phrase_cfg.get("chunk_seconds", 4.0))
+    overlap_sec = float(phrase_cfg.get("overlap_seconds", 1.25))
+    min_rms = float(phrase_cfg.get("min_rms", 0.004))
+    phrase_vad = bool(phrase_cfg.get("vad_filter", False))
+    phrase_debug = bool(phrase_cfg.get("debug", False))
+    phrase_fuzzy = float(phrase_cfg.get("fuzzy_ratio", 0.62))
     phrases = [str(p) for p in cfg.get("stand_down_phrases", ["stand down jarvis"])]
     max_lab_min = float(cfg.get("lab_session_max_minutes", 240))
 
     sr = clap.sr
     block = clap.block_samples
     q: queue.Queue[np.ndarray] = queue.Queue(maxsize=512)
+
+    input_dev = _resolve_input_device(cfg, sd)
 
     def audio_cb(indata, frames, t, status) -> None:  # type: ignore[no-untyped-def]
         if status:
@@ -299,22 +402,27 @@ def run_listener(cfg_path: Path) -> int:
         except queue.Full:
             pass
 
-    stream = sd.InputStream(
+    stream_kw: dict = dict(
         samplerate=sr,
         channels=1,
         dtype="float32",
         blocksize=block,
         callback=audio_cb,
     )
+    if input_dev is not None:
+        stream_kw["device"] = input_dev
+    stream = sd.InputStream(**stream_kw)
     stream.start()
 
     whisper_model = None
-    _print_audio_diagnostics(cfg, sd)
+    _print_audio_diagnostics(cfg, sd, input_dev)
     print(
         "Jarvis clap listener running. Clap twice (sharp, ~0.2–0.7s apart) for welcome. Ctrl+C to exit.\n"
         "Tip: set clap.debug to true in jarvis.json to print peak levels while tuning.\n",
         flush=True,
     )
+
+    _calibrate_clap_threshold(clap, q, cfg)
 
     phrase_buf: list[np.ndarray] = []
     phrase_t0 = 0.0
@@ -340,6 +448,11 @@ def run_listener(cfg_path: Path) -> int:
                 ctype = phrase_cfg.get("compute_type", "int8")
                 print(f"Loading Whisper model {wmodel!r}…", flush=True)
                 whisper_model = WhisperModel(wmodel, device="cpu", compute_type=ctype)
+                print(
+                    f"[phrase] Stand-down: say one of {phrases!r} "
+                    f"(~{chunk_sec}s chunks, {overlap_sec}s overlap; phrase.debug=true for details)",
+                    flush=True,
+                )
 
             if lab:
                 started = _session_started(cfg)
@@ -362,19 +475,29 @@ def run_listener(cfg_path: Path) -> int:
 
                 audio = np.concatenate(phrase_buf, axis=0)
                 phrase_buf.clear()
-                if _rms(audio) < min_rms:
+                rms_a = _rms(audio)
+                if rms_a < min_rms:
+                    if phrase_debug:
+                        print(f"[phrase] skip low rms={rms_a:.5f} < {min_rms}", flush=True)
                     continue
 
                 segments, _ = whisper_model.transcribe(  # type: ignore[union-attr]
                     audio.astype(np.float32),
                     beam_size=1,
                     language="en",
-                    vad_filter=True,
+                    vad_filter=phrase_vad,
                 )
                 text = "".join(s.text for s in segments).strip()
                 if text:
                     print(f"Heard: {text!r}", flush=True)
-                if phrase_matches(text, phrases):
+                elif phrase_debug:
+                    print("[phrase] Whisper returned empty text for this chunk", flush=True)
+
+                ovl = int(max(0.0, overlap_sec) * sr)
+                if ovl > 0 and len(audio) > ovl:
+                    phrase_buf.append(audio[-ovl:].copy())
+
+                if phrase_matches(text, phrases, fuzzy_ratio=phrase_fuzzy):
                     print("Stand-down phrase detected.", flush=True)
                     run_stand_down(cfg_path)
                     whisper_model = None

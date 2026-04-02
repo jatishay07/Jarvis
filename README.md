@@ -83,17 +83,30 @@ Double-clap near the mic → welcome. Speak your stand-down phrase → stand dow
 
 If you use a **venv**, run the listener with that interpreter instead of `/usr/bin/python3`, and point LaunchAgent at the same path.
 
-### 6. LaunchAgent (login + keep-alive)
+### 6. Always-on listener (login + background)
 
-1. Copy and edit [launchd/com.jarvis.claplistener.plist.example](launchd/com.jarvis.claplistener.plist.example): replace `REPLACE_WITH_*` with your repo path, home directory, and (recommended) venv `python3` path.
-2. Install:
+So double-clap works **without keeping Terminal open**, install the LaunchAgent once from the repo root:
 
 ```bash
-cp com.jarvis.claplistener.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.jarvis.claplistener.plist
+cd /path/to/Jarvis
+./scripts/install_launch_agent.sh
 ```
 
-Logs: `~/.jarvis/listener.log` and `listener.err.log` (after you create `~/.jarvis` or let the welcome script create it).
+This uses **`.venv/bin/python3`** if it exists (recommended); otherwise your `python3` from `PATH`. It sets **RunAtLoad** and **KeepAlive** so the listener starts at login and restarts if it crashes.
+
+**Before installing:** quit any **manual** `double_clap_listener.py` you have running in Terminal (only one process should use the mic).
+
+**Microphone (required):** **System Settings → Privacy & Security → Microphone** → enable for the Python shown at the end of the install script (often `.venv/bin/python3` inside your Jarvis folder). If macOS only lists “Python”, allow it and retry.
+
+**Logs:** `~/.jarvis/listener.log` and `~/.jarvis/listener.err.log`
+
+**Remove:**
+
+```bash
+./scripts/uninstall_launch_agent.sh
+```
+
+Manual plist editing is still possible via [launchd/com.jarvis.claplistener.plist.example](launchd/com.jarvis.claplistener.plist.example) if you prefer.
 
 ## Kiro + Codex + Claude
 
@@ -114,9 +127,13 @@ Stored under `~/.jarvis/` (or `state_dir` in config):
 ## Troubleshooting
 
 - **Double-clap does nothing**: If a **lab session** is still active from last time, the listener only listens for the **stand-down phrase**, not claps. Run `./scripts/jarvis_stand_down.sh` or delete `~/.jarvis/lab_session.json`. The listener prints a warning on startup if this is the case.
+- **Background listener (LaunchAgent) never starts Jarvis**: The listener now runs **welcome** with the **same Python** as itself (your `.venv`), so Pillow/Shortcuts still work. If it used to fail silently, reinstall: `./scripts/install_launch_agent.sh` then `tail -f ~/.jarvis/listener.err.log` while clapping — you should see `Double-clap detected` or a **Welcome script failed** line with the real error.
+- **Calibration**: On startup the listener measures **~1.2s** of background noise (`calibrate_seconds` in JSON; set to **0** to skip). Stay quiet during that window. Then clap sharply twice with a short pause between.
+- **`macOS 15 (1507) or later required` / Welcome script failed**: Was usually **tkinter** (removed) plus **Pillow 12+** on slightly older macOS builds. Run `pip install 'Pillow>=10,<12'` in `.venv`, pull latest Jarvis scripts, reinstall the LaunchAgent.
+- **Silent mic / AirPods**: Background listeners often get **zeros** from Bluetooth. In **System Settings → Sound → Input** choose **MacBook Microphone**, then run `python3 scripts/list_audio_devices.py`, put that device’s **index** (or a unique **name substring**) in **`clap.input_device`** in `jarvis.json`, and restart the listener.
 - **Claps not detected**: set `"clap.debug": true` in `jarvis.json` and watch `peak=` lines while clapping — then set `peak_threshold` **just below** the peaks you see when you clap (typical range **0.08–0.2** on laptop mics). Increase `max_clap_gap_ms` if your second clap is slow (up to **1200**). Allow a brief quiet moment between the two claps.
 - **False claps**: raise `peak_threshold` or shorten `max_clap_gap_ms`.
-- **Phrase never fires**: speak clearly after the welcome; check `listener.err.log`; try `tiny.en` vs `base.en` in `phrase.whisper_model` (slower, heavier).
+- **Phrase / stand-down never fires**: After welcome, logs should show `Heard: '…'` as you speak. Set `"phrase.debug": true` to see skipped chunks. Defaults now use **`vad_filter: false`** (VAD often dropped speech), **longer chunks + overlap** so phrases are not split, **lower `min_rms`**, and **fuzzy** matching for small Whisper mistakes. Tune `phrase.fuzzy_ratio` (lower = more lenient). If stand-down runs but nothing happens, check **`Stand-down script failed`** in `listener.err.log`.
 - **Wallpaper**: multi-Space behavior varies by macOS version; we set **every desktop** exposed to AppleScript. If one screen does not restore, re-save `wallpaper_restore.json` by running welcome once with a known-good wallpaper.
 
 ## Privacy
