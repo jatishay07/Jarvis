@@ -12,17 +12,28 @@ from pathlib import Path
 
 
 def screen_dimensions() -> tuple[int, int]:
+    """Avoid tkinter (breaks on some macOS/Python combos with version-gate errors)."""
     try:
-        import tkinter as tk
-
-        root = tk.Tk()
-        root.withdraw()
-        w = root.winfo_screenwidth()
-        h = root.winfo_screenheight()
-        root.destroy()
-        return int(w), int(h)
-    except Exception:
-        return 2560, 1600
+        out = subprocess.check_output(
+            [
+                "osascript",
+                "-e",
+                'tell application "Finder" to get bounds of window of desktop',
+            ],
+            text=True,
+            timeout=8,
+        ).strip()
+        # e.g. 0, 0, 1710, 1107  → left, top, right, bottom
+        cleaned = out.replace("{", "").replace("}", "")
+        parts = [int(x.strip()) for x in cleaned.split(",") if x.strip()]
+        if len(parts) >= 4:
+            left, top, right, bottom = parts[0], parts[1], parts[2], parts[3]
+            w, h = right - left, bottom - top
+            if w >= 640 and h >= 480:
+                return w, h
+    except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired, OSError):
+        pass
+    return 2560, 1600
 
 
 def _font_candidates() -> list[Path]:
