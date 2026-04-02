@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.jarvis.claplistener</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO/scripts/double_clap_listener.py</string>
+		<string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO/config/jarvis.json</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>JARVIS_CONFIG</key>
+		<string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO/config/jarvis.json</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>REPLACE_WITH_HOME/.jarvis/listener.log</string>
+	<key>StandardErrorPath</key>
+	<string>REPLACE_WITH_HOME/.jarvis/listener.err.log</string>
+</dict>
+</plist>

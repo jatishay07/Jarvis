@@ -1,0 +1,48 @@
+{
+  "say_voice": "Daniel",
+  "welcome_message": "Welcome Home Sir",
+  "stand_down_ack_message": "Very good, sir",
+  "stand_down_ack_enabled": true,
+  "shortcut_focus_on": "Jarvis Lab On",
+  "shortcut_focus_off": "Jarvis Lab Off",
+  "wallpaper_lab_image": "/Users/YOU/Pictures/jarvis-lab.jpg",
+  "holographic_wallpaper": {
+    "enabled": true,
+    "stand_down_ack": true,
+    "width": null,
+    "height": null,
+    "font_scale": 0.072,
+    "glow_blur": 14
+  },
+  "spotify_track_uri": "spotify:track:39shmbIHICJ2Wxnk1fPSdz",
+  "music_preview_seconds": 10,
+  "apps": {
+    "kiro": "Kiro",
+    "cursor": "Cursor"
+  },
+  "terminal_open_codex_claude": true,
+  "terminal_app": "Terminal",
+  "stand_down_phrases": [
+    "stand down jarvis",
+    "house party protocol"
+  ],
+  "stand_down_apps_quit": ["Kiro", "Cursor", "Terminal", "iTerm", "iTerm2"],
+  "state_dir": "~/.jarvis",
+  "clap": {
+    "sample_rate": 16000,
+    "block_ms": 20,
+    "peak_threshold": 0.12,
+    "hysteresis": 0.5,
+    "min_clap_gap_ms": 150,
+    "max_clap_gap_ms": 900,
+    "cooldown_seconds": 50,
+    "debug": false
+  },
+  "lab_session_max_minutes": 240,
+  "phrase": {
+    "chunk_seconds": 3.5,
+    "min_rms": 0.012,
+    "whisper_model": "tiny.en",
+    "compute_type": "int8"
+  }
+}
