@@ -46,7 +46,7 @@ def _stand_down_apps_to_quit(cfg: dict) -> list[str]:
         if k not in seen:
             seen.add(k)
             out.append(a)
-    if cfg.get("stand_down_quit_terminal", True):
+    if cfg.get("stand_down_quit_terminal", False):
         ta = cfg.get("terminal_app", "Terminal")
         k = ta.casefold()
         if k not in seen:
@@ -76,12 +76,19 @@ def _quit_app(name: str) -> None:
     _run_applescript_quiet(script)
 
 
-def _say(text: str, voice: str) -> None:
-    cmd = ["say"]
-    if voice:
-        cmd.extend(["-v", voice])
-    cmd.append(text)
-    subprocess.run(cmd, check=False)
+def _say(text: str, voice: str, cfg: dict) -> None:
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from jarvis_holographic_wallpaper import run_cli_say
+
+    run_cli_say(text, voice, cfg)
+
+
+def _afplay(path: str) -> None:
+    p = Path(os.path.expanduser(path)).expanduser().resolve()
+    if p.is_file():
+        subprocess.run(["afplay", str(p)], capture_output=True, text=True)
 
 
 def _restore_wallpaper(restore_path: Path, util: Path) -> None:
@@ -117,6 +124,10 @@ def main() -> int:
     hw = cfg.get("holographic_wallpaper", {})
     ack_msg = cfg.get("stand_down_ack_message", "Very good, sir")
     voice = cfg.get("say_voice", "")
+    sd_sound = str(cfg.get("stand_down_sound", "")).strip()
+    if sd_sound:
+        _afplay(sd_sound)
+
     holo_ack = (
         cfg.get("stand_down_ack_enabled", True)
         and hw.get("enabled", False)
@@ -135,7 +146,7 @@ def main() -> int:
         except Exception as e:
             print(f"Stand-down typing wallpaper failed: {e}", file=sys.stderr)
             if cfg.get("stand_down_ack_enabled", True):
-                _say(ack_msg, voice)
+                _say(ack_msg, voice, cfg)
         # Lab session used a black desktop; bring back the user's wallpaper for quit/Focus
         _restore_wallpaper(restore_path, util)
     else:
@@ -159,7 +170,7 @@ def main() -> int:
         session_path.unlink()
 
     if cfg.get("stand_down_ack_enabled", True) and not holo_ack:
-        _say(ack_msg, voice)
+        _say(ack_msg, voice, cfg)
 
     return 0
 

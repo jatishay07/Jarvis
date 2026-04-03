@@ -138,6 +138,10 @@ class ClapDetector:
         self._saw_quiet_after_first = False
         self._prev_peak = 0.0
 
+    def clear_cooldown(self) -> None:
+        """Allow another double-clap immediately (e.g. welcome subprocess failed)."""
+        self._last_fire = 0.0
+
     def process_block(self, block_mono: np.ndarray, now: float) -> bool:
         peak = float(np.max(np.abs(block_mono)))
         low = self.peak_threshold * self.hysteresis
@@ -416,6 +420,12 @@ def run_listener(cfg_path: Path) -> int:
 
     whisper_model = None
     _print_audio_diagnostics(cfg, sd, input_dev)
+    try:
+        idx = input_dev if input_dev is not None else sd.default.device[0]
+        dname = sd.query_devices(idx)["name"]
+        print(f"JARVIS // MIC ONLINE // {dname!r} (index {idx})\n", flush=True)
+    except Exception:
+        print("JARVIS // MIC ONLINE // (device unknown)\n", flush=True)
     print(
         "Jarvis clap listener running. Clap twice (sharp, ~0.2–0.7s apart) for welcome. Ctrl+C to exit.\n"
         "Tip: set clap.debug to true in jarvis.json to print peak levels while tuning.\n",
@@ -487,7 +497,10 @@ def run_listener(cfg_path: Path) -> int:
                     language="en",
                     vad_filter=phrase_vad,
                 )
-                text = "".join(s.text for s in segments).strip()
+                # Join with spaces — "".join() can glue words ("Stand"+"down" → "Standdown")
+                parts = [(s.text or "").strip() for s in segments]
+                parts = [p for p in parts if p]
+                text = " ".join(parts).strip()
                 if text:
                     print(f"Heard: {text!r}", flush=True)
                 elif phrase_debug:
@@ -501,6 +514,7 @@ def run_listener(cfg_path: Path) -> int:
                     print("Stand-down phrase detected.", flush=True)
                     run_stand_down(cfg_path)
                     whisper_model = None
+                    phrase_buf.clear()
                 continue
 
             # Clap mode
@@ -524,6 +538,8 @@ def run_listener(cfg_path: Path) -> int:
                     clap.reset_arm()
                 else:
                     print("Welcome script failed.", file=sys.stderr)
+                    clap.clear_cooldown()
+                    clap.reset_arm()
     except KeyboardInterrupt:
         print("Exiting.", flush=True)
     finally:

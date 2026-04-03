@@ -22,7 +22,12 @@
     "width": null,
     "height": null,
     "font_scale": 0.072,
-    "glow_blur": 14
+    "glow_blur": 14,
+    "glow_color": [40, 140, 255, 90],
+    "glow_alpha_multiplier": 1.15,
+    "glow_blur_scale": 1.0,
+    "glow_blur_extra": 4,
+    "glow_outer_pass_blur": 10
   },
   "stand_down_quit_spotify": true,
   "welcome_prepare_desktop": true,
@@ -33,20 +38,33 @@
   "welcome_terminal_hidden_launch": true,
   "welcome_delay_terminal_seconds": 6,
   "welcome_terminal_activate_after_delay": false,
-  "stand_down_quit_terminal": true,
+  "stand_down_quit_terminal": false,
   "spotify_track_uri": "spotify:track:39shmbIHICJ2Wxnk1fPSdz",
   "music_preview_seconds": 10,
   "apps": {
     "kiro": "Kiro",
     "cursor": "Cursor"
   },
-  "terminal_open_codex_claude": true,
+  "terminal_open_codex_claude": false,
   "terminal_app": "Terminal",
   "stand_down_phrases": [
     "stand down jarvis",
     "house party protocol"
   ],
   "stand_down_apps_quit": ["Kiro", "Cursor", "Terminal", "iTerm", "iTerm2"],
+  "say_words_per_minute": null,
+  "welcome_sound": "",
+  "stand_down_sound": "",
+  "welcome_messages": [],
+  "welcome_shortcuts_chain": [],
+  "hud_slider": {
+    "confirm_stand_down": true,
+    "threshold_left": 0.35,
+    "threshold_right": 0.65,
+    "cooldown_seconds": 2.5,
+    "position": "bottom",
+    "enabled": true
+  },
   "state_dir": "~/.jarvis",
   "clap": {
     "input_device": null,

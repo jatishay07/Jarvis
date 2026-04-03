@@ -86,6 +86,47 @@ def _subtitle_font_size_for_text(
     return 16
 
 
+def _glow_rgba(style: dict) -> tuple[int, int, int, int]:
+    gc = style.get("glow_color")
+    if isinstance(gc, (list, tuple)) and len(gc) >= 4:
+        r, g, b, a = (int(gc[0]), int(gc[1]), int(gc[2]), int(gc[3]))
+    else:
+        r, g, b, a = (40, 140, 255, 90)
+    mult = float(style.get("glow_alpha_multiplier", 1.0))
+    a = max(0, min(255, int(a * mult)))
+    return (r, g, b, a)
+
+
+def _effective_glow_blur(style: dict) -> int:
+    base = int(style.get("glow_blur", 12))
+    scaled = int(base * float(style.get("glow_blur_scale", 1.0)))
+    extra = int(style.get("glow_blur_extra", 0))
+    return max(1, scaled + extra)
+
+
+def say_words_per_minute_from_cfg(cfg: dict) -> int | None:
+    raw = cfg.get("say_words_per_minute")
+    if raw is None or raw is False:
+        return None
+    try:
+        wpm = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return wpm if wpm > 0 else None
+
+
+def run_cli_say(text: str, voice: str, cfg: dict) -> None:
+    """Same `say` flags as play_typing_wallpaper (voice + optional WPM)."""
+    wpm = say_words_per_minute_from_cfg(cfg)
+    cmd = ["say"]
+    if wpm is not None:
+        cmd.extend(["-r", str(wpm)])
+    if voice:
+        cmd.extend(["-v", voice])
+    cmd.append(text)
+    subprocess.run(cmd, check=False)
+
+
 def render_holographic_png(
     text: str,
     out_path: Path,
@@ -100,7 +141,7 @@ def render_holographic_png(
 
     style = style or {}
     layout = str(style.get("layout", "center"))
-    glow_blur = int(style.get("glow_blur", 12))
+    glow_blur = _effective_glow_blur(style)
     margin = int(width * 0.06)
 
     base = Image.new("RGB", (width, height), (0, 0, 0))
@@ -158,8 +199,10 @@ def render_holographic_png(
     else:
         y0 = max(margin, (height - total_h) // 2)
 
+    glow_fill = _glow_rgba(style)
+
     def draw_line_glow(d: ImageDraw.ImageDraw, x: int, y: int, line: str) -> None:
-        glow_color = (40, 140, 255, 90)
+        glow_color = glow_fill
         for ox, oy in [
             (0, 0),
             (3, 0),
@@ -196,6 +239,10 @@ def render_holographic_png(
 
     glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(max(1, glow_blur)))
     comp = Image.alpha_composite(rgba, glow_layer)
+    outer = int(style.get("glow_outer_pass_blur", 0))
+    if outer > 0:
+        outer_layer = glow_layer.filter(ImageFilter.GaussianBlur(max(1, outer)))
+        comp = Image.alpha_composite(comp, outer_layer)
     comp = Image.alpha_composite(comp, sharp)
     out = Image.alpha_composite(base.convert("RGBA"), comp).convert("RGB")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -226,13 +273,19 @@ def _wallpaper_set(util: Path, png: Path) -> None:
         )
 
 
-def measure_say_duration_seconds(text: str, voice: str) -> float:
+def measure_say_duration_seconds(
+    text: str,
+    voice: str,
+    wpm: int | None = None,
+) -> float:
     """Render speech to a temp AIFF and read duration with afinfo (macOS)."""
     fallback = max(1.8, min(12.0, len(text) * 0.068))
     fd, path = tempfile.mkstemp(suffix=".aiff", prefix="jarvis_say_")
     os.close(fd)
     try:
         cmd = ["say", "-o", path]
+        if wpm is not None and wpm > 0:
+            cmd.extend(["-r", str(wpm)])
         if voice:
             cmd.extend(["-v", voice])
         cmd.append(text)
@@ -283,7 +336,9 @@ def play_typing_wallpaper(
     frame_path = state / "holographic_wallpaper.png"
     black_path = state / "holographic_black.png"
 
-    duration = measure_say_duration_seconds(full_text, voice)
+    wpm = say_words_per_minute_from_cfg(cfg)
+    speech = full_text.replace("\n", " ").strip()
+    duration = measure_say_duration_seconds(speech, voice, wpm)
     show_cursor = bool(hw.get("typing_show_cursor", True))
     cursor_char = str(hw.get("typing_cursor_char", "|"))
     layout = str(hw.get("typing_layout", "subtitle"))
@@ -291,8 +346,7 @@ def play_typing_wallpaper(
     erase_anim = bool(hw.get("subtitle_erase_animated", True))
     erase_seconds = float(hw.get("subtitle_erase_seconds", 0.45))
 
-    display = full_text.replace("\n", " ").strip()
-    if not display:
+    if not speech:
         render_black_png(black_path, w, h)
         _wallpaper_set(util, black_path)
         return
@@ -300,21 +354,23 @@ def play_typing_wallpaper(
     frame_style: dict = dict(hw)
     frame_style["layout"] = layout
     if layout == "subtitle":
-        sub_px = _subtitle_font_size_for_text(display, w, h, hw)
-        frame_style["_subtitle_full_text"] = display
+        sub_px = _subtitle_font_size_for_text(speech, w, h, hw)
+        frame_style["_subtitle_full_text"] = speech
         frame_style["_subtitle_fixed_font_px"] = sub_px
 
-    n = len(display)
+    n = len(speech)
     say_cmd = ["say"]
+    if wpm is not None and wpm > 0:
+        say_cmd.extend(["-r", str(wpm)])
     if voice:
         say_cmd.extend(["-v", voice])
-    say_cmd.append(full_text)
+    say_cmd.append(speech)
     proc = subprocess.Popen(say_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     t0 = time.perf_counter()
     try:
         for i in range(1, n + 1):
-            visible = display[:i]
+            visible = speech[:i]
             if show_cursor and i < n:
                 visible = visible + cursor_char
             render_holographic_png(visible, frame_path, w, h, frame_style)
@@ -338,14 +394,14 @@ def play_typing_wallpaper(
     time.sleep(pause)
 
     # Full line without cursor (hold beat)
-    render_holographic_png(display, frame_path, w, h, frame_style)
+    render_holographic_png(speech, frame_path, w, h, frame_style)
     _wallpaper_set(util, frame_path)
     time.sleep(float(hw.get("subtitle_hold_full_seconds", 0.2)))
 
     if erase_anim and n > 0:
         per = erase_seconds / n
         for j in range(n - 1, -1, -1):
-            visible = display[:j]
+            visible = speech[:j]
             if show_cursor and j > 0:
                 visible = visible + cursor_char
             elif not visible.strip():

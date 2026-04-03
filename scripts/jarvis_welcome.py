@@ -108,12 +108,19 @@ def _shortcuts_run(name: str) -> None:
         print(f"Warning: shortcuts run '{name}': {r.stderr.strip()}", file=sys.stderr)
 
 
-def _say(text: str, voice: str) -> None:
-    cmd = ["say"]
-    if voice:
-        cmd.extend(["-v", voice])
-    cmd.append(text)
-    subprocess.run(cmd, check=False)
+def _say(text: str, voice: str, cfg: dict) -> None:
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from jarvis_holographic_wallpaper import run_cli_say
+
+    run_cli_say(text, voice, cfg)
+
+
+def _afplay(path: str) -> None:
+    p = Path(os.path.expanduser(path)).expanduser().resolve()
+    if p.is_file():
+        subprocess.run(["afplay", str(p)], capture_output=True, text=True)
 
 
 def _prepare_desktop_for_wallpaper(hide_other_apps: bool) -> None:
@@ -190,7 +197,7 @@ def _lab_process_names(cfg: dict) -> list[str]:
         apps.get("kiro", "Kiro"),
         apps.get("cursor", "Cursor"),
     ]
-    if cfg.get("terminal_open_codex_claude", True):
+    if cfg.get("terminal_open_codex_claude", False):
         names.append(_terminal_process_name(cfg.get("terminal_app", "Terminal")))
     if str(cfg.get("spotify_track_uri", "")).strip():
         names.append("Spotify")
@@ -212,7 +219,7 @@ def _terminal_codex_claude(
     activate: bool = False,
     hidden_launch: bool = True,
 ) -> None:
-    if not cfg.get("terminal_open_codex_claude", True):
+    if not cfg.get("terminal_open_codex_claude", False):
         return
     term = cfg.get("terminal_app", "Terminal")
     if hidden_launch:
@@ -296,6 +303,11 @@ def main() -> int:
             pass
 
     welcome_text = cfg.get("welcome_message", "Welcome Home Sir")
+    msgs = cfg.get("welcome_messages")
+    if isinstance(msgs, list) and len(msgs) > 0:
+        welcome_lines = [str(m).strip() for m in msgs if str(m).strip()]
+    else:
+        welcome_lines = [welcome_text.strip()] if welcome_text.strip() else ["Welcome Home Sir"]
     voice = cfg.get("say_voice", "")
     hw = cfg.get("holographic_wallpaper", {})
     prepare = cfg.get("welcome_prepare_desktop", True)
@@ -306,8 +318,18 @@ def main() -> int:
     term_delay = float(cfg.get("welcome_delay_terminal_seconds", 6.0))
     term_activate = cfg.get("welcome_terminal_activate_after_delay", False)
     term_hidden = cfg.get("welcome_terminal_hidden_launch", True)
+    open_terminal = cfg.get("terminal_open_codex_claude", False)
+
+    ws = str(cfg.get("welcome_sound", "")).strip()
+    if ws:
+        _afplay(ws)
+
     try:
         _backup_wallpaper(state)
+    except Exception as e:
+        print(f"Warning: wallpaper backup skipped: {e}", file=sys.stderr)
+
+    try:
         if prepare:
             _prepare_desktop_for_wallpaper(hide_others)
         if hw.get("enabled", False):
@@ -316,17 +338,26 @@ def main() -> int:
                 sys.path.insert(0, str(scripts))
             from jarvis_holographic_wallpaper import play_typing_wallpaper
 
-            play_typing_wallpaper(cfg, state, welcome_text, voice)
+            for line in welcome_lines:
+                play_typing_wallpaper(cfg, state, line, voice, end_with_black=True)
         else:
-            _set_lab_wallpaper(cfg, state, welcome_text)
-            _say(welcome_text, voice)
+            combined = " ".join(welcome_lines)
+            _set_lab_wallpaper(cfg, state, combined)
+            for line in welcome_lines:
+                _say(line, voice, cfg)
     except Exception as e:
-        print(f"Wallpaper step failed: {e}", file=sys.stderr)
-        return 1
+        # Hide Others / holographic typing can fail (Automation, Pillow, wallpaper_util) while
+        # leaving everything in the background — still run voice, Focus, apps, and Spotify.
+        print(f"Wallpaper/typing failed; continuing welcome: {e}", file=sys.stderr)
+        for line in welcome_lines:
+            _say(line, voice, cfg)
 
     on_name = cfg.get("shortcut_focus_on", "")
     if on_name:
         _shortcuts_run(on_name)
+    for extra in cfg.get("welcome_shortcuts_chain", []) or []:
+        if isinstance(extra, str) and extra.strip():
+            _shortcuts_run(extra.strip())
 
     uri = cfg.get("spotify_track_uri", "")
     sec = float(cfg.get("music_preview_seconds", 10))
@@ -355,29 +386,33 @@ def main() -> int:
         time.sleep(0.45)
         _dock_lab_behind_desktop(cfg)
 
-    def _run_terminal() -> None:
-        _terminal_codex_claude(
-            cfg,
-            activate=term_activate,
-            hidden_launch=term_hidden,
-        )
-
     term_timer: threading.Timer | None = None
-    if term_delay > 0:
-        term_timer = threading.Timer(term_delay, _run_terminal)
-        term_timer.start()
-    else:
-        _run_terminal()
+    if open_terminal:
 
+        def _run_terminal() -> None:
+            _terminal_codex_claude(
+                cfg,
+                activate=term_activate,
+                hidden_launch=term_hidden,
+            )
+
+        if term_delay > 0:
+            term_timer = threading.Timer(term_delay, _run_terminal)
+            term_timer.start()
+        else:
+            _run_terminal()
+
+    if term_timer is not None:
+        term_timer.join()
+    join_wait = max(sec, term_delay if open_terminal else 0.0) + 30.0
+    if spotify_th is not None:
+        spotify_th.join(timeout=join_wait)
+
+    # Mark lab session only after welcome finishes (crash/kill mid-run leaves no stale lock)
     session_path.write_text(
         json.dumps({"active": True, "started": time.time()}, indent=2),
         encoding="utf-8",
     )
-
-    if term_timer is not None:
-        term_timer.join()
-    if spotify_th is not None:
-        spotify_th.join(timeout=max(sec, term_delay) + 30.0)
 
     return 0
 
