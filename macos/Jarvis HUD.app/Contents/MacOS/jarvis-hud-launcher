@@ -1,0 +1,30 @@
+#!/bin/bash
+# Thin launcher: runs the copied HUD runtime from ~/.jarvis so the login app
+# does not need direct access to a repo living under Documents/Desktop.
+set -euo pipefail
+RUNTIME_DIR="${HOME}/.jarvis/hud_runtime"
+HUD_APPKIT_PY="${RUNTIME_DIR}/jarvis_hud_appkit.py"
+HUD_TK_PY="${RUNTIME_DIR}/jarvis_hud_slider.py"
+HUD_CFG="${HOME}/.jarvis/hud_config.json"
+HUD_PYTHON_FILE="${HOME}/.jarvis/hud_python_path"
+if [[ ! -f "$HUD_APPKIT_PY" && ! -f "$HUD_TK_PY" ]]; then
+  osascript -e 'display dialog "Jarvis HUD: missing ~/.jarvis/hud_runtime. Run scripts/install_hud_login.sh from your Jarvis clone." buttons {"OK"} default button "OK"' 2>/dev/null || true
+  exit 1
+fi
+if [[ ! -f "$HUD_CFG" ]]; then
+  osascript -e 'display dialog "Jarvis HUD: missing ~/.jarvis/hud_config.json. Run scripts/install_hud_login.sh from your Jarvis clone." buttons {"OK"} default button "OK"' 2>/dev/null || true
+  exit 1
+fi
+export JARVIS_CONFIG="${JARVIS_CONFIG:-$HUD_CFG}"
+PY="${PYTHON_JARVIS_HUD:-}"
+if [[ -z "$PY" && -f "$HUD_PYTHON_FILE" ]]; then
+  PY="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$HUD_PYTHON_FILE" | head -n 1)"
+fi
+if [[ -n "$PY" && -x "$PY" && -f "$HUD_APPKIT_PY" ]]; then
+  exec "$PY" -B "$HUD_APPKIT_PY"
+fi
+if [[ -x /usr/bin/python3 && -f "$HUD_TK_PY" ]]; then
+  exec /usr/bin/python3 "$HUD_TK_PY"
+fi
+osascript -e 'display dialog "Jarvis HUD: no working Python runtime found." buttons {"OK"} default button "OK"' 2>/dev/null || true
+exit 1

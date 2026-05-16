@@ -11,6 +11,7 @@
 5. Run a manual welcome: `./scripts/jarvis_welcome.sh` with `JARVIS_CONFIG` set.
 6. Run stand-down: `./scripts/jarvis_stand_down.sh`.
 7. Test the listener in a Terminal: `python3 scripts/double_clap_listener.py` — double-clap for welcome, speak stand-down when the session is active.
+8. Optional: run **`./scripts/jarvis_doctor.sh`** to confirm config, imports, and state look sane.
 
 *In practice:* keep `clap.debug` on briefly while tuning `peak_threshold` so you can see peaks in the log.
 
@@ -19,7 +20,7 @@
 1. Log in; LaunchAgent starts `double_clap_listener.py` (same Python as install).
 2. **Idle:** double-clap triggers welcome (or use a **wake phrase** if configured).
 3. **Lab active:** speak a **stand-down phrase**; Whisper + fuzzy match in `jarvis_phrase.py` decides if it counts.
-4. If something misbehaves, check `~/.jarvis/listener.log` and `listener.err.log`.
+4. If something misbehaves, run **`./scripts/jarvis_doctor.sh`**, then check `~/.jarvis/listener.log` and `listener.err.log`.
 
 ```mermaid
 sequenceDiagram
@@ -46,6 +47,7 @@ sequenceDiagram
 
 ## Journey D — Debugging “nothing happens”
 
+0. **`./scripts/jarvis_doctor.sh`** — quick read-only snapshot of config, Python deps, state files, LaunchAgents, and HUD runtime drift.
 1. **Lab already active?** Stand down or remove `~/.jarvis/lab_session.json` if stale.
 2. **Listener not running?** `launchctl list | grep jarvis` and logs under `~/.jarvis/`.
 3. **HUD invisible?** `JARVIS_HUD_DEBUG_VISIBILITY_MODE=always_visible` then `titled_debug` (see [08-hud.md](08-hud.md)).

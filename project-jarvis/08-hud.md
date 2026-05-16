@@ -44,27 +44,41 @@ flowchart TD
 
 ## Lab chrome overlay (`hud_overlay`)
 
-When the **AppKit** HUD runs, it can create **additional borderless windows** above the desktop (non-interactive, click-through), controlled by the **`hud_overlay`** object in `jarvis.json`. See [04-configuration.md](04-configuration.md) for every key; this section explains the idea.
+When the **AppKit** HUD runs, it can create **additional borderless windows** (non-interactive, click-through) from **`hud_overlay`** in `jarvis.json`. See [04-configuration.md](04-configuration.md) for keys; behavior summary:
 
 | Layer | What it does |
 |-------|----------------|
 | **Background** | One window per **NSScreen**: dim / grid / scan-line style fill (`JarvisBackgroundView`). |
 | **Arc reactor** | Centered on the **main** display: animated rings and orbiting particles (`JarvisArcReactorView`). |
-| **Dictation** | A horizontal strip showing **character-by-character** text read from **`state_dir/dictation_text.txt`**. **Welcome** writes that file (all welcome lines joined with spaces) before speaking; **stand down** deletes it. The view polls file **mtime** to restart typing when the file changes. |
+| **Dictation** | Horizontal strip: **character-by-character** text from **`state_dir/dictation_text.txt`**. **Welcome** writes the file (welcome lines joined with spaces) before speaking; **stand down** deletes it. **mtime** changes restart the typing animation. |
+
+**Stacking order:** background, arc, and dictation windows are set to **desktop level** (`NSNormalWindowLevel - 1` in code) so they sit **behind normal application windows** — you see them on the **desktop picture**, not on top of Safari or your IDE. The **glass slider** and optional **edge sensor** strips use **floating** level (`NSFloatingWindowLevel`) so they sit **above** normal windows and receive mouse events: the slider is the large visible control; sensors are thin strips for edge dwell / hover (the logical edge band depth is still **`hud_slider.hover_zone_px`**). Overlay chrome stays at desktop level only.
 
 **In practice:** set **`hud_overlay.enabled`** to **`false`** if you only want the slim slider with no extra chrome. **Tk** and **dialog** backends do **not** implement this overlay.
 
-Timers in AppKit advance overlay animation (~24 fps) and poll the dictation file.
+### When overlays are visible
+
+Overlay windows are **built at HUD startup** with **opacity 0**. The delegate then:
+
+1. Reads whether a lab session is already active (`lab_session.json`).
+2. If **active**, calls **`_show_overlays()`** — animates overlay windows to **fully visible** (~0.6s).
+3. A **0.5s timer** compares `lab_active` to the previous sample: transition **inactive → active** shows overlays; **active → inactive** (e.g. after stand down) runs **`_hide_overlays()`** — fades them back to **transparent** (~0.5s).
+
+So the arc/grid/dictation chrome is **not** on screen between stand-down and the next welcome, even if the HUD process keeps running. The **dictation** view still advances from **`dictation_text.txt`** on animation ticks while the overlay windows exist; when hidden, you simply do not see them.
+
+**Timers:** ~24 fps drives arc / dictation animation; dictation also reacts when the text file’s modification time changes.
 
 ## AppKit HUD behavior (normal mode)
 
 Config under **`hud_slider`** in JSON (see [04-configuration.md](04-configuration.md)).
 
-- Starts **hidden**; moving the pointer into **`hover_zone_px`** of the **top** or **bottom** edge (per `position`) reveals the control.
+- Starts **hidden**; in the default **`reveal_mode = edge_dwell`**, the pointer must stay inside **`hover_zone_px`** at the **top** or **bottom** edge (per `position`) for **`reveal_dwell_seconds`** before the slider animates in. **`reveal_mode = edge`** (aliases: `immediate`, `edge_immediate`, `hover`) reveals as soon as the cursor enters the band.
 - Hides after **`hide_delay_seconds`** when the cursor leaves both the edge band and the HUD window.
-- **Semantics:** knob on the **left** = standby; **right** = operational. Moving **left → right** triggers **welcome** when the lab is inactive; **right → left** triggers **stand down** (no confirmation dialog in AppKit).
-- **Right-click** quits the HUD process.
+- **Knob vs lab session:** when the slider **first becomes visible**, the knob **syncs from `lab_active`**: **right** (operational) if a session is already active, **left** (standby) if idle — so the control matches state after peek-on-launch or reopening the HUD.
+- **Semantics:** knob **left** = standby; **right** = operational. Moving **left → right** triggers **welcome** when the lab is inactive; **right → left** triggers **stand down** (no confirmation dialog in AppKit; use **dialog HUD** for `confirm_stand_down`).
+- **Quit:** **right-click** the slider for a context menu, or **Control-click** (same menu).
 - **`debug_visibility_mode`:** `normal` | `always_visible` | `titled_debug` — also overridable via `JARVIS_HUD_DEBUG_VISIBILITY_MODE`.
+- **`peek_on_launch_seconds`** (when `debug_visibility_mode` is **`normal`**): if **greater than 0**, the slider **shows immediately** for that many seconds (then hides unless the cursor is in the hover zone). Helps discover the control on first launch. Same key is documented for Tk layout; AppKit honors it too.
 
 ## Tk vs AppKit: opposite drag directions
 
@@ -95,9 +109,10 @@ See [09-installation-and-launchd.md](09-installation-and-launchd.md) for logs an
 
 ## Diagnostics
 
-When run from Terminal, AppKit HUD prints build id, visibility mode, frames, blur vs fallback — first stop if the control does not appear.
+When run from Terminal, AppKit HUD prints **stderr** diagnostics including **build id**, **visibility mode**, **blur** host, **`reveal=`** (reveal mode), **`dwell=`** (seconds), **hover** px, **poll** interval, **visibleFrame**, **window** / **slide** rects, **slideHidden**, **slideAlpha** — first stop if the control does not appear.
 
 ## Related material
 
 - Shorter reference: [`docs/HUD.md`](../docs/HUD.md)
 - [03-user-journeys.md](03-user-journeys.md) — HUD-only journey
+- [09-installation-and-launchd.md](09-installation-and-launchd.md) — **`jarvis_doctor`** (HUD runtime drift, PyObjC, LaunchAgents)

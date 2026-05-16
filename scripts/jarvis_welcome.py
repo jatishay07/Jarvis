@@ -302,6 +302,12 @@ def main() -> int:
         except json.JSONDecodeError:
             pass
 
+    # Write session immediately so HUD overlays activate before first word is spoken.
+    session_path.write_text(
+        json.dumps({"active": True, "started": time.time()}, indent=2),
+        encoding="utf-8",
+    )
+
     welcome_text = cfg.get("welcome_message", "Welcome Home Sir")
     msgs = cfg.get("welcome_messages")
     if isinstance(msgs, list) and len(msgs) > 0:
@@ -329,9 +335,16 @@ def main() -> int:
     except Exception as e:
         print(f"Warning: wallpaper backup skipped: {e}", file=sys.stderr)
 
+    combined = " ".join(welcome_lines)
+
     try:
         if prepare:
             _prepare_desktop_for_wallpaper(hide_others)
+        # Write dictation just before TTS so typing starts in sync with the voice.
+        try:
+            (state / "dictation_text.txt").write_text(combined, encoding="utf-8")
+        except OSError:
+            pass
         if hw.get("enabled", False):
             scripts = Path(__file__).resolve().parent
             if str(scripts) not in sys.path:
@@ -341,7 +354,6 @@ def main() -> int:
             for line in welcome_lines:
                 play_typing_wallpaper(cfg, state, line, voice, end_with_black=True)
         else:
-            combined = " ".join(welcome_lines)
             _set_lab_wallpaper(cfg, state, combined)
             for line in welcome_lines:
                 _say(line, voice, cfg)
@@ -351,6 +363,12 @@ def main() -> int:
         print(f"Wallpaper/typing failed; continuing welcome: {e}", file=sys.stderr)
         for line in welcome_lines:
             _say(line, voice, cfg)
+
+    time.sleep(0.5)
+    try:
+        (state / "dictation_text.txt").unlink(missing_ok=True)
+    except OSError:
+        pass
 
     on_name = cfg.get("shortcut_focus_on", "")
     if on_name:
@@ -408,11 +426,14 @@ def main() -> int:
     if spotify_th is not None:
         spotify_th.join(timeout=join_wait)
 
-    # Mark lab session only after welcome finishes (crash/kill mid-run leaves no stale lock)
-    session_path.write_text(
-        json.dumps({"active": True, "started": time.time()}, indent=2),
-        encoding="utf-8",
-    )
+    # Project selection: ask which project to work on, listen, open in editor
+    if cfg.get("projects", {}).get("enabled", True):
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from jarvis_projects import prompt_for_project
+            prompt_for_project(cfg)
+        except Exception as _pe:
+            print(f"[jarvis_welcome] project prompt skipped: {_pe}", file=sys.stderr)
 
     return 0
 

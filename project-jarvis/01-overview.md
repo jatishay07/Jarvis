@@ -31,11 +31,12 @@
 
 | Term | Meaning |
 |------|---------|
+| **Jarvis doctor** | Diagnostics helper ([`scripts/jarvis_doctor.py`](../scripts/jarvis_doctor.py), wrapper `jarvis_doctor.sh`): prints Python version, resolved config path, key state paths, and LaunchAgent status. Run it first when something feels miswired. |
 | **Lab session** | Logical “session active” state stored in `lab_session.json`. While active, the listener expects **stand-down speech**, not double-claps for welcome. |
 | **Welcome** | Script-driven routine that prepares desktop, wallpaper, voice, Focus, apps, Spotify, then writes the lab session file. |
 | **Stand down** | Routine that ends the lab, restores wallpaper, clears session state, quits apps, turns Focus off. |
 | **HUD** | Manual UI when clapping or speaking is impractical: native **AppKit** slider (preferred), **Tk** fallback, or **AppleScript dialog**. |
-| **HUD overlay** | Optional full-screen-style chrome in **`hud_overlay`** (AppKit only): animated background grid, center “arc reactor” graphic, and a **dictation** line that types out text from **`dictation_text.txt`** in `state_dir`. |
+| **HUD overlay** | Optional chrome in **`hud_overlay`** (AppKit only): background grid, center “arc reactor,” and a **dictation** strip. Those layers use a **low window level** so they sit **on the desktop behind ordinary app windows** (visible on wallpaper); the HUD **slider** and **edge sensor** strips stay **floating** above apps for input. Overlays stay **transparent until a lab session is active**, then **hide after stand down** (~0.5s poll vs `lab_session.json`). Dictation text comes from **`dictation_text.txt`** in `state_dir`. |
 | **Holographic wallpaper** | Pillow-generated frames: subtitle-style typing (and optional erase) synced with `say`, instead of a single static lab image. |
 | **Wake phrase** | Optional voice trigger that runs **welcome** while not in a lab session (alternative to double-clap). |
 | **Stand-down phrase** | Spoken phrase matched fuzzily after Whisper transcription (e.g. “stand down jarvis”). |
@@ -44,3 +45,4 @@
 
 - [02-architecture.md](02-architecture.md) — how pieces connect
 - [04-configuration.md](04-configuration.md) — all the knobs in one place
+- [12-backlog.md](12-backlog.md) — possible future work (informal)

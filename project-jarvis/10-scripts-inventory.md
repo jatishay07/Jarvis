@@ -16,12 +16,14 @@ Every file under [`scripts/`](../scripts/) in this repository, with a short role
 | **`jarvis_phrase.py`** | Fuzzy phrase matching for Whisper output (stand-down + wake). |
 | **`phrase_listener.py`** | Re-exports `phrase_matches` for tests/imports. |
 | **`jarvis_hud_lib.py`** | Repo resolution, HUD singleton lock, spawn welcome/stand-down. |
-| **`jarvis_hud_appkit.py`** | Native macOS HUD (hover slider). |
+| **`jarvis_hud_appkit.py`** | Native macOS HUD: hover / dwell reveal, glass slider, optional **`hud_overlay`** (desktop-level chrome). |
 | **`jarvis_hud_slider.py`** | Tk HUD slider fallback. |
 | **`jarvis_hud_dialog.py`** | AppleScript list dialog HUD. |
 | **`jarvis_hud_slider.sh`** | Picks Python + backend: AppKit → Tk → dialog. |
 | **`jarvis_hud_dialog.sh`** | Launches dialog HUD. |
 | **`jarvis_hud_restart.sh`** | Kill HUD processes and restart via `jarvis_hud_slider.sh`. |
+| **`jarvis_doctor.py`** | Read-only local diagnostics: config, runtime imports, state files, LaunchAgents, HUD runtime drift. |
+| **`jarvis_doctor.sh`** | Runs `jarvis_doctor.py` with venv Python when `.venv` exists. |
 | **`list_audio_devices.py`** | Lists input devices for `clap.input_device` tuning. |
 | **`jarvis_lib.sh`** | Optional shell helpers (`jarvis_root`, `jarvis_config_path`, `jarvis_json_get`); not sourced by other repo scripts but safe to use from custom wrappers. |
 | **`install_launch_agent.sh`** | Install `com.jarvis.claplistener` LaunchAgent. |

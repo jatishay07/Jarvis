@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -142,11 +143,20 @@ def main() -> int:
         from jarvis_holographic_wallpaper import play_typing_wallpaper
 
         try:
+            (state / "dictation_text.txt").write_text(ack_msg, encoding="utf-8")
+        except OSError:
+            pass
+        try:
             play_typing_wallpaper(cfg, state, ack_msg, voice, end_with_black=True)
         except Exception as e:
             print(f"Stand-down typing wallpaper failed: {e}", file=sys.stderr)
             if cfg.get("stand_down_ack_enabled", True):
                 _say(ack_msg, voice, cfg)
+        time.sleep(0.5)
+        try:
+            (state / "dictation_text.txt").unlink(missing_ok=True)
+        except OSError:
+            pass
         # Lab session used a black desktop; bring back the user's wallpaper for quit/Focus
         _restore_wallpaper(restore_path, util)
     else:
@@ -168,6 +178,13 @@ def main() -> int:
 
     if session_path.is_file():
         session_path.unlink()
+
+    # Clear project state so the HUD projects panel hides
+    for _pf in ("active_project.json", "projects_prompt.json"):
+        try:
+            (state / _pf).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     if cfg.get("stand_down_ack_enabled", True) and not holo_ack:
         _say(ack_msg, voice, cfg)

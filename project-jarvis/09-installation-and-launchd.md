@@ -29,6 +29,21 @@ cp config/jarvis.example.json config/jarvis.json
 - **Microphone:** System Settings → Privacy & Security → Microphone → allow the **exact Python** you use (e.g. `.venv/bin/python3`).
 - **Automation:** May prompt when AppleScript drives Terminal or System Events (Hide Others, hiding app windows).
 
+## Health check (`jarvis_doctor`)
+
+From the repo root (uses **`.venv/bin/python3`** when present):
+
+```bash
+export JARVIS_CONFIG="$PWD/config/jarvis.json"   # optional; doctor resolves like other scripts
+./scripts/jarvis_doctor.sh
+```
+
+Optional config path: `./scripts/jarvis_doctor.sh /path/to/jarvis.json`
+
+**What it does (read-only):** loads config if present; **Runtime** section verifies **`numpy`**, **`sounddevice`**, **`faster_whisper`** imports in the preferred repo Python, plus **PyObjC/AppKit** on Darwin (WARN if missing). **State** covers **`lab_session.json`**, **`welcome.pid`**, **`dictation_text.txt`**, **`wallpaper_restore.json`**. **LaunchAgents** probes **`com.jarvis.claplistener`** and **`com.jarvis.hud`**. **HUD Runtime** compares **`~/.jarvis/hud_runtime/`** copies to repo HUD scripts and checks **`~/.jarvis/hud_python_path`**. Exit code **1** if any check is **FAIL** (warnings alone still exit **0**).
+
+See also [11-troubleshooting.md](11-troubleshooting.md) (doctor is the recommended first step).
+
 ## Clap listener LaunchAgent
 
 **Install:** [`scripts/install_launch_agent.sh`](../scripts/install_launch_agent.sh)

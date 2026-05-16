@@ -20,7 +20,7 @@
 
 | Variable | Purpose |
 |----------|---------|
-| `JARVIS_CONFIG` | Path to `jarvis.json` for almost all scripts. |
+| `JARVIS_CONFIG` | Path to `jarvis.json` for almost all scripts. `jarvis_doctor` prints the resolved path (and warns if unset vs default). |
 | `JARVIS_REPO_ROOT` | Optional override for repo root (HUD lib resolution). |
 | `PYTHON_JARVIS_HUD` | Force a specific Python for HUD scripts. |
 | `JARVIS_HUD_BACKEND` | `tk` forces Tk-first order on `jarvis_hud_slider.sh` (see [08-hud.md](08-hud.md)). |
@@ -118,6 +118,8 @@
 |-----|---------|
 | `enabled` | Whether HUD features are relevant in your workflow (scripts may still check other keys). |
 | `position` | `top` or `bottom` (AppKit). |
+| `reveal_mode` | AppKit: **`edge_dwell`** (default) requires the cursor to stay in the hover band for **`reveal_dwell_seconds`** before the slider appears (reduces accidental reveals). **`edge`** reveals as soon as the pointer enters the band (older behavior). Aliases normalized to **`edge`**: `immediate`, `edge_immediate`, `hover`. Unknown values fall back to **`edge_dwell`**. |
+| `reveal_dwell_seconds` | Seconds to hold in the edge band when `reveal_mode` is **`edge_dwell`**. If the key is **omitted**, the code default is **0.4**; [`jarvis.example.json`](../config/jarvis.example.json) uses **3.0** for a more deliberate dwell. |
 | `hover_zone_px` | Edge band that reveals the HUD. |
 | `hide_delay_seconds` | Hide after pointer leaves edge + HUD. |
 | `cooldown_seconds` | Cooldown after actions. |
@@ -126,8 +128,8 @@
 | `confirm_stand_down` | Dialog path: confirm before stand-down. |
 | `threshold_left` / `threshold_right` | Tk slider thresholds (legacy path). |
 | `margin_from_top` / `margin_from_bottom` | Tk / layout margins. |
-| `peek_on_launch_seconds` | Tk / older HUD paths: brief peek on launch. |
-| `show_top_anchor_strip` | Tk / older paths: optional anchor strip. |
+| `peek_on_launch_seconds` | **AppKit** (normal mode): seconds to **force the slider visible** right after launch, then hide if the pointer is not in the hover zone. **Tk:** same idea for the floating strip. Use **`0`** to disable. |
+| `show_top_anchor_strip` | **AppKit** (normal mode, **`position` = `top`**): show a visual **indicator** on the edge **hover sensor** windows. When **`position`** is **`bottom`**, AppKit forces this off. **Tk:** optional top anchor strip styling. |
 
 ### HUD lab chrome (`hud_overlay`)
 
@@ -138,7 +140,7 @@ Used only by the **AppKit** HUD ([`jarvis_hud_appkit.py`](../scripts/jarvis_hud_
 | **`hud_overlay.enabled`** | Master switch for overlay feature. |
 | **`background`** | Per-screen borderless layer: `base_alpha`, `grid_size_px`, `grid_alpha`, `scan_period_seconds`; each sub-key has its own `enabled`. |
 | **`arc_reactor`** | Centered decorative animation on the main display: size, ring, orbit, particle count, rotation period. |
-| **`dictation`** | Typing-style strip reading **`state_dir/dictation_text.txt`**. Welcome writes that file (combined welcome lines); stand-down deletes it. Keys include `window_width`, `window_height`, `screen_y_fraction`, `font_size_pt`, `ms_per_char`, `cursor_blink_period_seconds`. |
+| **`dictation`** | Typing-style strip reading **`state_dir/dictation_text.txt`**. Welcome writes that file (combined welcome lines); stand-down deletes it. Keys include `window_width`, `window_height`, **`screen_y_fraction`** (main display: **larger** values place the strip **lower** toward the bottom edge; code default **0.60**, example JSON **0.90**), `font_size_pt`, `ms_per_char`, `cursor_blink_period_seconds`. |
 
 Defaults and full structure: [`config/jarvis.example.json`](../config/jarvis.example.json).
 

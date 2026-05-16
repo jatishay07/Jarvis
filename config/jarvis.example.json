@@ -1,6 +1,6 @@
 {
   "say_voice": "Daniel",
-  "welcome_message": "Welcome Home Sir",
+  "welcome_message": "Welcome home, sir.",
   "stand_down_ack_message": "Very good, sir",
   "stand_down_ack_enabled": true,
   "shortcut_focus_on": "Jarvis Lab On",
@@ -23,7 +23,12 @@
     "height": null,
     "font_scale": 0.072,
     "glow_blur": 14,
-    "glow_color": [40, 140, 255, 90],
+    "glow_color": [
+      40,
+      140,
+      255,
+      90
+    ],
     "glow_alpha_multiplier": 1.15,
     "glow_blur_scale": 1.0,
     "glow_blur_extra": 4,
@@ -51,7 +56,16 @@
     "stand down jarvis",
     "house party protocol"
   ],
-  "stand_down_apps_quit": ["Kiro", "Cursor", "Terminal", "iTerm", "iTerm2"],
+  "wake_phrases": [
+    "Daddy's Home"
+  ],
+  "stand_down_apps_quit": [
+    "Kiro",
+    "Cursor",
+    "Terminal",
+    "iTerm",
+    "iTerm2"
+  ],
   "say_words_per_minute": null,
   "welcome_sound": "",
   "stand_down_sound": "",
@@ -59,10 +73,20 @@
   "welcome_shortcuts_chain": [],
   "hud_slider": {
     "confirm_stand_down": true,
+    "cooldown_seconds": 2.5,
+    "position": "top",
+    "margin_from_top": 44,
+    "margin_from_bottom": 100,
+    "reveal_mode": "edge_dwell",
+    "reveal_dwell_seconds": 3.0,
+    "hover_zone_px": 80,
+    "hide_delay_seconds": 0.38,
+    "use_blur": true,
+    "debug_visibility_mode": "normal",
     "threshold_left": 0.35,
     "threshold_right": 0.65,
-    "cooldown_seconds": 2.5,
-    "position": "bottom",
+    "peek_on_launch_seconds": 4.0,
+    "show_top_anchor_strip": true,
     "enabled": true
   },
   "state_dir": "~/.jarvis",
@@ -76,7 +100,10 @@
     "min_clap_gap_ms": 150,
     "max_clap_gap_ms": 900,
     "cooldown_seconds": 50,
-    "debug": false
+    "adaptive_calibration": true,
+    "debug": false,
+    "min_spectral_flatness_db": -12,
+    "max_onset_duration_ms": 120
   },
   "lab_session_max_minutes": 240,
   "phrase": {
@@ -88,5 +115,59 @@
     "debug": false,
     "whisper_model": "tiny.en",
     "compute_type": "int8"
+  },
+  "hud_overlay": {
+    "enabled": true,
+    "background": {
+      "enabled": true,
+      "base_alpha": 0.5,
+      "grid_size_px": 50,
+      "grid_alpha": 0.12,
+      "scan_period_seconds": 4.0
+    },
+    "arc_reactor": {
+      "enabled": true,
+      "size_px": 300,
+      "ring_diameter_px": 280,
+      "ring_stroke_width": 6.0,
+      "orbit_radius_px": 150,
+      "particle_count": 8,
+      "rotation_period_seconds": 4.0
+    },
+    "dictation": {
+      "enabled": true,
+      "window_width": 800,
+      "window_height": 120,
+      "screen_y_fraction": 0.9,
+      "font_size_pt": 48.0,
+      "ms_per_char": 60,
+      "cursor_blink_period_seconds": 1.5
+    }
+  },
+  "lab_focus": {
+    "enabled": true,
+    "cooldown_seconds": 3,
+    "default_source": "terminal",
+    "sources": {
+      "kiro": "Kiro",
+      "cursor": "Cursor",
+      "claude": "Cursor",
+      "codex": null,
+      "terminal": null
+    },
+    "watch_file": "focus_request.json",
+    "watch_file_enabled": true,
+    "watch_file_poll_seconds": 0.5
+  },
+  "projects": {
+    "enabled": true,
+    "github_token_env": "GITHUB_TOKEN",
+    "cache_ttl_hours": 6,
+    "listen_seconds": 6,
+    "fuzzy_threshold": 0.55,
+    "default_editor": "cursor",
+    "local_paths": {
+      "Jarvis": "/Users/YOU/Documents/GitHub/LandingPage/Jarvis"
+    }
   }
 }

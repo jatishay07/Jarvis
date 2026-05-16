@@ -1,6 +1,6 @@
 # Jarvis
 
-macOS “Iron Man” routine: **double-clap** → welcome (voice, Focus, lab wallpaper, Kiro, Cursor, optional Spotify **~10 s** stinger). **Terminal with `codex` / `claude` is off by default** (`terminal_open_codex_claude`); turn it on if you want that flow. While a **lab session** is active, say a configured phrase (e.g. “stand down jarvis”) to **stand down**—save/quit apps, restore wallpaper and Focus, pause Spotify. If clapping or speech is impractical, use the optional **HUD slider** (see below).
+macOS “Iron Man” routine: **double-clap** → welcome (voice, Focus, lab wallpaper, Kiro, Cursor, optional Spotify **~10 s** stinger). **Terminal with `codex` / `claude` is off by default** (`terminal_open_codex_claude`); turn it on if you want that flow. While a **lab session** is active, say a configured phrase (e.g. “stand down jarvis”) to **stand down**—save/quit apps, restore wallpaper and Focus, pause Spotify. If clapping or speech is impractical, use the optional **HUD** — **dialog** or **slider** (see below).
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Edit `config/jarvis.json`:
 - **`welcome_sound`** / **`stand_down_sound`**: optional paths to short audio files; **`afplay`** at the start of welcome / stand-down when set
 - **`welcome_shortcuts_chain`**: optional list of Shortcut names to run after **`shortcut_focus_on`** (e.g. dim display, extra Focus)
 - **`shortcut_focus_on` / `shortcut_focus_off`**: names of two Shortcuts (see below)
-- **`clap.*`**: tune `peak_threshold` / gaps if claps are missed or false-trigger
+- **`clap.*`**: tune `peak_threshold` / gaps if claps are missed or false-trigger. **`clap.input_device`**: `null` uses the system default mic (safest after macOS updates); or set an **index** or **name substring** from `scripts/list_audio_devices.py`. **`clap.adaptive_calibration`**: when `true` (default), the listener **raises** `peak_threshold` from measured noise during calibration — stay **quiet** during that window, or set **`adaptive_calibration`** to **`false`** to use your JSON `peak_threshold` exactly.
 - **`stand_down_phrases`**: lowercase-ish phrases; ASR is fuzzy (e.g. `stand down jarvis`, `house party protocol`)
 
 ### 2. Shortcuts (Focus)
@@ -75,6 +75,7 @@ The first lab session will download the **Whisper** model (`tiny.en` by default)
 export JARVIS_CONFIG="$PWD/config/jarvis.json"
 ./scripts/jarvis_welcome.sh    # welcome once
 ./scripts/jarvis_stand_down.sh # restore
+./scripts/jarvis_doctor.sh     # concise local diagnostics
 python3 scripts/double_clap_listener.py
 ```
 
@@ -125,26 +126,52 @@ There is **no stable public API** assumed for driving Kiro’s internal terminal
 
 To use Kiro’s terminal only: leave `terminal_open_codex_claude` false and use Kiro’s own automation or run the CLIs manually.
 
-## Desktop HUD slider (no clap / no speech)
+## Desktop HUD (no clap / no speech)
 
-When you cannot double-clap or speak stand-down phrases (meeting, library, broken mic), run a small floating strip and drag the slider:
+When you cannot double-clap or speak stand-down phrases (meeting, library, broken mic), use one of these:
 
-- **Left** (release past the left threshold) → same as double-clap welcome (blocked if a lab session is already active).
-- **Right** → stand-down (optional confirmation dialog; **`hud_slider.confirm_stand_down`**, default `true`).
-- **Center** → idle.
+For full HUD architecture, launch modes, and debugging notes, see [docs/HUD.md](docs/HUD.md).
 
-From the repo root (same **`JARVIS_CONFIG`** as other scripts):
+### A. Native dialog (recommended if Tk fails)
+
+**No Tkinter required** — uses a standard macOS list dialog:
 
 ```bash
 export JARVIS_CONFIG="$PWD/config/jarvis.json"
-python3 scripts/jarvis_hud_slider.py
+./scripts/jarvis_hud_dialog.sh
 ```
 
-Optional config object **`hud_slider`**: `threshold_left`, `threshold_right`, `cooldown_seconds`, `position` (`bottom` / `top`), `confirm_stand_down`, and **`enabled`** (for your own LaunchAgent notes— the script does not refuse to run when `enabled` is false). You can add a second **LaunchAgent** plist to start the HUD at login if you want it always available; many users prefer starting it manually so it is not always on screen.
+Pick **Welcome** or **Stand down**; optional stand-down confirmation matches **`hud_slider.confirm_stand_down`**.
+
+### B. Floating slider (Tk → AppKit → dialog)
+
+**`./scripts/jarvis_hud_slider.sh`** picks the first backend that works: **Tk** window, then **native AppKit** slider (**no Tk** — install **`pip install pyobjc-framework-Cocoa`** in your venv or system Python), then falls back to the **same dialog** as §A so something always appears.
+
+The **Tk** strip keeps the older mapping: drag **left** → welcome, **right** → stand-down (welcome blocked if a lab session is already active). **Center** → idle.
+
+The **native AppKit** HUD (preferred on macOS) is a **borderless liquid-glass slider** at the top (or bottom) of the screen: move the pointer within **`hud_slider.hover_zone_px`** of the **top** (or **bottom**, when **`position`** is **`bottom`**) of the visible desktop and, by default, hold there briefly using **`hud_slider.reveal_mode = "edge_dwell"`** plus **`hud_slider.reveal_dwell_seconds`** before a centered **340×58** pill track **drifts down** from above the edge. Set **`reveal_mode`** to **`edge`** if you want the older immediate reveal behavior. The HUD hides again after **`hide_delay_seconds`** once the cursor leaves both that edge band and the HUD window. The actual HUD window footprint matches the control itself instead of using a full-width transparent strip, and it re-centers on the display under the pointer before revealing. Reveal detection uses a short cursor poll backed by AppKit mouse monitors. **Drag** the knob to snap **left** (stand down) or **right** (welcome / operational), or **click anywhere on the pill** to slide the knob across. AppKit stand-down fires immediately with **no confirmation prompt**. **Right-click** the control for **Quit** (there is no title-bar close button). Set **`use_blur`** to **`false`** to use a drawn “pseudo-glass” fallback instead of **`NSVisualEffectView`** (WithinWindow blur on the pill only). If you run from Terminal, stderr shows **`Jarvis HUD: build=…`** plus the chosen visible frame, window frame, slider frame, and whether the blur or fallback host was used. Voice and wallpaper copy still come only from **`welcome_message`** / **`welcome_messages`** in your JSON; if **`welcome_messages`** is a non-empty list, it **replaces** **`welcome_message`**, so put your opening line as the **first** entry.
+
+The **Tk** strip is still **top-center** (`hud_slider.position`: **`top`**, **`margin_from_top`** ~**44** px) or **`bottom`** with **`margin_from_bottom`**.
+
+**Standalone app + login (no Terminal):** From the repo root run **`./scripts/install_hud_login.sh`**. It copies **[`macos/Jarvis HUD.app`](macos/Jarvis HUD.app)** to **`~/Applications/Jarvis HUD.app`**, writes **`~/.jarvis/repository_path`** (absolute path to this clone), and installs LaunchAgent **`com.jarvis.hud`** with **RunAtLoad** + **KeepAlive** so the HUD starts at login and respawns if you close the window. The app’s launcher runs **`.venv/bin/python3`** + **[`scripts/jarvis_hud_appkit.py`](scripts/jarvis_hud_appkit.py)** (install **`pyobjc-framework-Cocoa`** in the venv first). Remove with **`./scripts/uninstall_hud_login.sh`** (same as **`./scripts/uninstall_hud_launch_agent.sh`**). Logs: **`~/.jarvis/hud.app.log`** and **`hud.app.err.log`**. If macOS blocks the unsigned app the first time, open **Jarvis HUD** once from **Finder → ~/Applications** via **Right-click → Open**, then approve.
+
+**Manual run (development):**
+
+```bash
+cd /path/to/Jarvis
+source .venv/bin/activate   # optional
+pip install pyobjc-framework-Cocoa
+export JARVIS_CONFIG="$PWD/config/jarvis.json"
+./scripts/jarvis_hud_slider.sh
+```
+
+Optional **`hud_slider`**: AppKit — **`reveal_mode`** (`edge_dwell` or `edge`), **`reveal_dwell_seconds`**, **`hover_zone_px`**, **`hide_delay_seconds`**, **`use_blur`**, **`cooldown_seconds`**, **`position`** (`top` / `bottom`), **`margin_from_bottom`**, **`enabled`**, and **`debug_visibility_mode`** (`normal`, `always_visible`, `titled_debug`). Tk/dialog legacy paths still use **`confirm_stand_down`**, **`threshold_left`**, and **`threshold_right`**. Keys like **`margin_from_top`**, **`peek_on_launch_seconds`**, and **`show_top_anchor_strip`** are mainly for AppKit / older / Tk layout behavior rather than the dialog path. For one-off debugging without editing JSON, you can also launch with **`JARVIS_HUD_DEBUG_VISIBILITY_MODE=always_visible`** (or **`titled_debug`**) before **`./scripts/jarvis_hud_slider.sh`**. See [docs/HUD.md](docs/HUD.md) for the full debug flow.
+
+**Custom appearance:** When you have mockups, tune colors, fonts, and window chrome in **`jarvis_hud_appkit.py`** (and optionally **`jarvis_hud_slider.py`** for the Tk fallback); new optional JSON keys can be added under **`hud_slider`** as needed.
 
 ## Iron Man–style ideas (backlog)
 
-Stronger preset glow (tweak **`holographic_wallpaper`** JSON), optional **`welcome_sound`** / **`stand_down_sound`**, chained **`welcome_messages`**, extra Shortcuts via **`welcome_shortcuts_chain`**, and future upgrades (phoneme sync, `jarvis_doctor`, etc.) are natural extensions; the config keys above cover the common ones.
+Stronger preset glow (tweak **`holographic_wallpaper`** JSON), optional **`welcome_sound`** / **`stand_down_sound`**, chained **`welcome_messages`**, extra Shortcuts via **`welcome_shortcuts_chain`**, and future upgrades (phoneme sync, richer HUD themes, etc.) are natural extensions; the config keys above cover the common ones. For a **local health report**, use **`./scripts/jarvis_doctor.sh`** (read-only checks: config, imports, state, LaunchAgents, HUD runtime drift).
 
 ## State files
 
@@ -152,12 +179,18 @@ Stored under `~/.jarvis/` (or `state_dir` in config):
 
 - `lab_session.json` — lab session active flag and start time
 - `wallpaper_restore.json` — previous desktop picture paths for restore
+- `repository_path` — one line: absolute path to the Jarvis repo (written by **`install_hud_login.sh`** for **`Jarvis HUD.app`**)
 
 ## Troubleshooting
 
-- **Double-clap does nothing**: If a **lab session** is still active from last time, the listener only listens for the **stand-down phrase**, not claps. Run `./scripts/jarvis_stand_down.sh` or delete `~/.jarvis/lab_session.json`. The listener prints a warning on startup if this is the case.
+- **Quick health check**: Run **`./scripts/jarvis_doctor.sh`** for a concise read-only report covering config resolution, Python/runtime imports, state files, LaunchAgents, and HUD runtime drift.
+- **Double-clap does nothing**: If a **lab session** is still active from last time, the listener only listens for the **stand-down phrase**, not claps. Run `./scripts/jarvis_stand_down.sh` or delete `~/.jarvis/lab_session.json`. The listener prints a warning on startup if this is the case. While active, a **successful double-clap** is **ignored** and logs **`Double-clap ignored — lab session already ACTIVE`** (at most about once every 25 seconds) so it is obvious you are not in “fresh” clap mode.
 - **Background listener (LaunchAgent) never starts Jarvis**: The listener now runs **welcome** with the **same Python** as itself (your `.venv`), so Pillow/Shortcuts still work. If it used to fail silently, reinstall: `./scripts/install_launch_agent.sh` then `tail -f ~/.jarvis/listener.err.log` while clapping — you should see `Double-clap detected` or a **Welcome script failed** line with the real error.
 - **Calibration**: On startup the listener measures **~1.2s** of background noise (`calibrate_seconds` in JSON; set to **0** to skip). Stay quiet during that window. Then clap sharply twice with a short pause between. It also prints **`JARVIS // MIC ONLINE // …`** with the input device name (see LaunchAgent logs).
+- **HUD slider not visible / Tk broken**: Use **`./scripts/jarvis_hud_dialog.sh`** instead — it does not use Tkinter. If the AppKit HUD exists but you still do not see it, launch with **`JARVIS_HUD_DEBUG_VISIBILITY_MODE=always_visible ./scripts/jarvis_hud_slider.sh`** first; if needed, use **`titled_debug`** next to isolate borderless-window issues. The production AppKit HUD is a **small floating window** rather than a full-width transparent strip. **`System Settings → Privacy & Security → Automation`** may prompt for **Terminal** or **Python** the first time **`osascript`** runs the dialog HUD. See [docs/HUD.md](docs/HUD.md) for the full debug flow.
+- **`No module named '_tkinter'`** / **Tkinter**: **`jarvis_hud_slider.sh`** picks the first Python that can **`import tkinter`** (venv if it has Tk, else **Apple `/usr/bin/python3`**, else `python3` on `PATH`). Homebrew Python often ships **without** Tk; use Apple’s Python for the HUD or install **`brew install python-tk`** and recreate the venv if you need Tk inside `.venv`. To force an interpreter: **`PYTHON_JARVIS_HUD=/path/to/python3 ./scripts/jarvis_hud_slider.sh`**.
+- **`Python quit unexpectedly`** when opening the HUD: Usually **Tk** + **Homebrew Python** (bad Tcl/Tk). The launcher now prefers **AppKit** (`jarvis_hud_appkit.py`) on macOS first; run **`pip install pyobjc-framework-Cocoa`** and **`./scripts/jarvis_hud_slider.sh`** again. To force Tk anyway: **`JARVIS_HUD_BACKEND=tk ./scripts/jarvis_hud_slider.sh`**. Or use **`./scripts/jarvis_hud_dialog.sh`** (no GUI toolkit).
+- **HUD does not appear at login:** Run **`./scripts/install_hud_login.sh`** from the repo (updates **`~/Applications/Jarvis HUD.app`** and **`~/.jarvis/repository_path`**). Check **`launchctl list | grep jarvis`** and **`tail -f ~/.jarvis/hud.app.err.log`**. Re-run install after moving the repo so **`repository_path`** stays correct. If **`~/Applications`** does not exist, the script creates it.
 - **`macOS 15 (1507) or later required` / Welcome script failed**: Was usually **tkinter** (removed) plus **Pillow 12+** on slightly older macOS builds. Run `pip install 'Pillow>=10,<12'` in `.venv`, pull latest Jarvis scripts, reinstall the LaunchAgent.
 - **Silent mic / AirPods**: Background listeners often get **zeros** from Bluetooth. In **System Settings → Sound → Input** choose **MacBook Microphone**, then run `python3 scripts/list_audio_devices.py`, put that device’s **index** (or a unique **name substring**) in **`clap.input_device`** in `jarvis.json`, and restart the listener.
 - **Claps not detected**: set `"clap.debug": true` in `jarvis.json` and watch `peak=` lines while clapping — then set `peak_threshold` **just below** the peaks you see when you clap (typical range **0.08–0.2** on laptop mics). Increase `max_clap_gap_ms` if your second clap is slow (up to **1200**). Allow a brief quiet moment between the two claps.

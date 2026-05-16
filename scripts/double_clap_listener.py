@@ -79,22 +79,32 @@ def _rms(x: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(x), dtype=np.float64)))
 
 
+def _spectral_flatness_db(block: np.ndarray) -> float:
+    """Spectral flatness in dB. Claps score near 0 dB (broadband); speech/music score < -15 dB."""
+    mags = np.abs(np.fft.rfft(block))
+    power = mags ** 2 + 1e-12
+    geom = float(np.exp(float(np.mean(np.log(power)))))
+    arith = float(np.mean(power))
+    return float(10.0 * np.log10(geom / arith + 1e-300))
+
+
 def run_welcome(cfg_path: Path) -> bool:
-    """Use sys.executable so LaunchAgent's venv Python runs welcome (same deps as listener)."""
+    """Use the wrapper so welcome always prefers the repo venv/runtime."""
     env = os.environ.copy()
     env["JARVIS_CONFIG"] = str(cfg_path)
     root = _root()
-    script = Path(__file__).resolve().parent / "jarvis_welcome.py"
+    script = Path(__file__).resolve().parent / "jarvis_welcome.sh"
+    print(
+        f"[runtime] welcome wrapper={script} config={cfg_path} listener_python={sys.executable}",
+        flush=True,
+    )
     r = subprocess.run(
-        [sys.executable, str(script)],
+        [str(script)],
         env=env,
         cwd=str(root),
-        capture_output=True,
-        text=True,
     )
     if r.returncode != 0:
-        err = (r.stderr or r.stdout or "").strip()
-        print(f"Welcome script failed ({r.returncode}): {err}", file=sys.stderr, flush=True)
+        print(f"Welcome script failed ({r.returncode})", file=sys.stderr, flush=True)
     return r.returncode == 0
 
 
@@ -102,17 +112,18 @@ def run_stand_down(cfg_path: Path) -> None:
     env = os.environ.copy()
     env["JARVIS_CONFIG"] = str(cfg_path)
     root = _root()
-    script = Path(__file__).resolve().parent / "jarvis_stand_down.py"
+    script = Path(__file__).resolve().parent / "jarvis_stand_down.sh"
+    print(
+        f"[runtime] stand-down wrapper={script} config={cfg_path} listener_python={sys.executable}",
+        flush=True,
+    )
     r = subprocess.run(
-        [sys.executable, str(script)],
+        [str(script)],
         env=env,
         cwd=str(root),
-        capture_output=True,
-        text=True,
     )
     if r.returncode != 0:
-        err = (r.stderr or r.stdout or "").strip()
-        print(f"Stand-down script failed ({r.returncode}): {err}", file=sys.stderr, flush=True)
+        print(f"Stand-down script failed ({r.returncode})", file=sys.stderr, flush=True)
 
 
 class ClapDetector:
@@ -128,10 +139,13 @@ class ClapDetector:
         self.min_gap = float(c.get("min_clap_gap_ms", 200)) / 1000.0
         self.max_gap = float(c.get("max_clap_gap_ms", 650)) / 1000.0
         self.cooldown = float(c.get("cooldown_seconds", 50))
+        self.min_flatness_db = float(c.get("min_spectral_flatness_db", -12.0))
+        self.max_onset_duration = float(c.get("max_onset_duration_ms", 120.0)) / 1000.0
         self._last_fire = 0.0
         self._prev_peak = 0.0
         self._first_onset: float | None = None
         self._saw_quiet_after_first = False
+        self._last_flatness_db = 0.0
 
     def reset_arm(self) -> None:
         self._first_onset = None
@@ -141,6 +155,11 @@ class ClapDetector:
     def clear_cooldown(self) -> None:
         """Allow another double-clap immediately (e.g. welcome subprocess failed)."""
         self._last_fire = 0.0
+
+    def _is_clap_shaped(self, block_mono: np.ndarray) -> bool:
+        """Return True if the block looks like a broadband transient (clap), not speech/music/hum."""
+        self._last_flatness_db = _spectral_flatness_db(block_mono)
+        return self._last_flatness_db >= self.min_flatness_db
 
     def process_block(self, block_mono: np.ndarray, now: float) -> bool:
         peak = float(np.max(np.abs(block_mono)))
@@ -153,7 +172,7 @@ class ClapDetector:
             return False
 
         if self._first_onset is None:
-            if crossed_up:
+            if crossed_up and self._is_clap_shaped(block_mono):
                 self._first_onset = now
                 self._saw_quiet_after_first = False
             return False
@@ -161,13 +180,16 @@ class ClapDetector:
         if not self._saw_quiet_after_first:
             if quiet_enough:
                 self._saw_quiet_after_first = True
+            elif now - self._first_onset > self.max_onset_duration:
+                # Sustained loud sound — not a clap; reset without re-arming
+                self.reset_arm()
             elif now - self._first_onset > self.max_gap:
                 self._first_onset = None
-                if crossed_up:
+                if crossed_up and self._is_clap_shaped(block_mono):
                     self._first_onset = now
             return False
 
-        if crossed_up:
+        if crossed_up and self._is_clap_shaped(block_mono):
             dt = now - self._first_onset
             self._first_onset = None
             self._saw_quiet_after_first = False
@@ -180,7 +202,7 @@ class ClapDetector:
 
         if now - self._first_onset > self.max_gap:
             self.reset_arm()
-            if crossed_up:
+            if crossed_up and self._is_clap_shaped(block_mono):
                 self._first_onset = now
         return False
 
@@ -207,11 +229,20 @@ def _calibrate_clap_threshold(
             continue
     if not peaks:
         return
+    if not bool(cfg.get("clap", {}).get("adaptive_calibration", True)):
+        print(
+            "[clap] adaptive_calibration is false — using peak_threshold from config (no noise adjust).",
+            flush=True,
+        )
+        return
     arr = np.array(peaks, dtype=np.float64)
     p20 = float(np.percentile(arr, 20))
     p80 = float(np.percentile(arr, 80))
+    p95 = float(np.percentile(arr, 95))
     span = max(p80 - p20, 0.002)
-    adaptive = max(clap.peak_threshold, p20 + span * 3.0, p80 * 1.35)
+    # Use p95 (not p80) as the noise ceiling — more robust against a single transient noise spike
+    # during the calibration window that would otherwise overshoot the threshold.
+    adaptive = max(clap.peak_threshold, p20 + span * 3.0, p95 * 1.15)
     adaptive = min(adaptive, 0.48)
     if p80 < 1e-4:
         print(
@@ -228,7 +259,7 @@ def _calibrate_clap_threshold(
             )
     orig_t = cfg.get("clap", {}).get("peak_threshold", 0.12)
     print(
-        f"[clap] Noise band ~{p20:.3f}–{p80:.3f} → using peak_threshold={adaptive:.3f} "
+        f"[clap] Noise band ~{p20:.3f}–{p80:.3f} (p95={p95:.3f}) → using peak_threshold={adaptive:.3f} "
         f"(config base {orig_t})",
         flush=True,
     )
@@ -322,6 +353,25 @@ def run_watch(cfg_path: Path) -> int:
             time.sleep(1.5)
 
 
+def _validate_input_device(sd, idx: int | None) -> int | None:
+    """Drop invalid indices (wrong device after OS update, Bluetooth reordering, etc.)."""
+    if idx is None:
+        return None
+    try:
+        d = sd.query_devices(idx)
+        if int(d.get("max_input_channels", 0)) < 1:
+            print(
+                f"[clap] input_device index {idx} is not a microphone — using system default. "
+                "Set clap.input_device to null or run scripts/list_audio_devices.py",
+                flush=True,
+            )
+            return None
+    except Exception as e:
+        print(f"[clap] input_device {idx} invalid ({e}) — using default.", flush=True)
+        return None
+    return idx
+
+
 def _resolve_input_device(cfg: dict, sd) -> int | None:
     """Optional clap.input_device: int index or substring of device name (case-insensitive)."""
     raw = cfg.get("clap", {}).get("input_device")
@@ -367,6 +417,20 @@ def _print_audio_diagnostics(cfg: dict, sd, input_index: int | None) -> None:
         print(f"Could not query input device: {e}", flush=True)
 
 
+def _sync_black_lab_wallpaper(cfg: dict, state_dir: Path) -> None:
+    hw = cfg.get("holographic_wallpaper", {})
+    if not hw.get("enabled", False):
+        return
+    if not _lab_active(cfg):
+        return
+    try:
+        from jarvis_holographic_wallpaper import apply_black_wallpaper
+
+        apply_black_wallpaper(cfg, state_dir)
+    except Exception as e:
+        print(f"Warning: could not sync black lab wallpaper: {e}", file=sys.stderr, flush=True)
+
+
 def run_listener(cfg_path: Path) -> int:
     if not cfg_path.is_file():
         print(f"Missing config: {cfg_path}", file=sys.stderr)
@@ -376,6 +440,11 @@ def run_listener(cfg_path: Path) -> int:
     cfg = _load_config(cfg_path)
     state_dir = _expand_state_dir(cfg)
     state_dir.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[runtime] listener python={sys.executable} prefix={sys.prefix} config={cfg_path}",
+        flush=True,
+    )
+    _sync_black_lab_wallpaper(cfg, state_dir)
 
     clap = ClapDetector(cfg)
     clap_debug = bool(cfg.get("clap", {}).get("debug", False))
@@ -389,13 +458,16 @@ def run_listener(cfg_path: Path) -> int:
     phrase_debug = bool(phrase_cfg.get("debug", False))
     phrase_fuzzy = float(phrase_cfg.get("fuzzy_ratio", 0.62))
     phrases = [str(p) for p in cfg.get("stand_down_phrases", ["stand down jarvis"])]
+    wake_phrases = [str(p) for p in cfg.get("wake_phrases", [])]
     max_lab_min = float(cfg.get("lab_session_max_minutes", 240))
 
     sr = clap.sr
     block = clap.block_samples
     q: queue.Queue[np.ndarray] = queue.Queue(maxsize=512)
 
-    input_dev = _resolve_input_device(cfg, sd)
+    input_dev = _validate_input_device(sd, _resolve_input_device(cfg, sd))
+
+    _lab_clap_warn_t = [0.0]
 
     def audio_cb(indata, frames, t, status) -> None:  # type: ignore[no-untyped-def]
         if status:
@@ -426,8 +498,9 @@ def run_listener(cfg_path: Path) -> int:
         print(f"JARVIS // MIC ONLINE // {dname!r} (index {idx})\n", flush=True)
     except Exception:
         print("JARVIS // MIC ONLINE // (device unknown)\n", flush=True)
+    wake_hint = f" Or say: {wake_phrases!r}." if wake_phrases else ""
     print(
-        "Jarvis clap listener running. Clap twice (sharp, ~0.2–0.7s apart) for welcome. Ctrl+C to exit.\n"
+        f"Jarvis clap listener running. Clap twice (sharp, ~0.2–0.7s apart) for welcome.{wake_hint} Ctrl+C to exit.\n"
         "Tip: set clap.debug to true in jarvis.json to print peak levels while tuning.\n",
         flush=True,
     )
@@ -436,13 +509,17 @@ def run_listener(cfg_path: Path) -> int:
 
     phrase_buf: list[np.ndarray] = []
     phrase_t0 = 0.0
+    wake_buf: list[np.ndarray] = []
 
     try:
         while True:
             lab = _lab_active(cfg)
             if not lab:
                 phrase_buf.clear()
-                whisper_model = None
+                # Keep whisper_model alive if wake phrase detection is configured;
+                # free it only when no phrases need it in clap mode.
+                if not wake_phrases:
+                    whisper_model = None
             if lab and whisper_model is None:
                 try:
                     from faster_whisper import WhisperModel
@@ -527,19 +604,84 @@ def run_listener(cfg_path: Path) -> int:
                 pk = float(np.max(np.abs(chunk)))
                 if pk > 0.04 and now - _last_debug_t[0] > 0.25:
                     _last_debug_t[0] = now
-                    print(f"[clap debug] peak={pk:.3f} (threshold={clap.peak_threshold})", flush=True)
+                    flat = _spectral_flatness_db(chunk)
+                    broadband = "broadband" if flat >= clap.min_flatness_db else "NOT broadband"
+                    print(
+                        f"[clap debug] peak={pk:.3f} (threshold={clap.peak_threshold:.3f}) "
+                        f"flatness={flat:.1f}dB ({broadband}, min={clap.min_flatness_db:.0f}dB)",
+                        flush=True,
+                    )
             if clap.process_block(chunk, now):
                 if _lab_active(cfg):
                     clap.reset_arm()
+                    if now - _lab_clap_warn_t[0] > 25.0:
+                        _lab_clap_warn_t[0] = now
+                        sp = _session_path(cfg)
+                        print(
+                            "\n[clap] Double-clap ignored — lab session already ACTIVE (welcome already ran). "
+                            "Say your stand-down phrase, run ./scripts/jarvis_stand_down.sh, or use the HUD.\n"
+                            f"        Clear session file if stuck: rm {sp}\n",
+                            flush=True,
+                        )
                     continue
                 print("Double-clap detected → welcome routine.", flush=True)
                 if run_welcome(cfg_path):
                     phrase_buf.clear()
+                    wake_buf.clear()
                     clap.reset_arm()
                 else:
                     print("Welcome script failed.", file=sys.stderr)
                     clap.clear_cooldown()
                     clap.reset_arm()
+                continue
+
+            # Wake phrase detection (runs in clap mode when wake_phrases are configured)
+            if wake_phrases:
+                wake_buf.append(chunk)
+                if sum(len(x) for x in wake_buf) >= int(chunk_sec * sr):
+                    wake_audio = np.concatenate(wake_buf, axis=0)
+                    wake_buf.clear()
+                    ovl = int(max(0.0, overlap_sec) * sr)
+                    if ovl > 0 and len(wake_audio) > ovl:
+                        wake_buf.append(wake_audio[-ovl:].copy())
+
+                    if _rms(wake_audio) >= min_rms:
+                        if whisper_model is None:
+                            try:
+                                from faster_whisper import WhisperModel
+                            except ImportError:
+                                print(
+                                    "wake_phrases configured but faster-whisper not installed. "
+                                    "pip install faster-whisper",
+                                    file=sys.stderr,
+                                )
+                                wake_phrases.clear()
+                                continue
+                            wmodel = phrase_cfg.get("whisper_model", "tiny.en")
+                            ctype = phrase_cfg.get("compute_type", "int8")
+                            print(f"Loading Whisper {wmodel!r} for wake phrase detection…", flush=True)
+                            whisper_model = WhisperModel(wmodel, device="cpu", compute_type=ctype)
+
+                        segments, _ = whisper_model.transcribe(  # type: ignore[union-attr]
+                            wake_audio.astype(np.float32),
+                            beam_size=1,
+                            language="en",
+                            vad_filter=phrase_vad,
+                        )
+                        parts = [(s.text or "").strip() for s in segments]
+                        text = " ".join(p for p in parts if p).strip()
+                        if phrase_debug and text:
+                            print(f"[wake] Heard: {text!r}", flush=True)
+
+                        if phrase_matches(text, wake_phrases, fuzzy_ratio=phrase_fuzzy):
+                            print("Wake phrase detected → welcome routine.", flush=True)
+                            if run_welcome(cfg_path):
+                                wake_buf.clear()
+                                clap.reset_arm()
+                            else:
+                                print("Welcome script failed.", file=sys.stderr)
+                                clap.clear_cooldown()
+                                clap.reset_arm()
     except KeyboardInterrupt:
         print("Exiting.", flush=True)
     finally:

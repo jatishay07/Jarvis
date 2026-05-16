@@ -73,10 +73,11 @@ stateDiagram-v2
 | `jarvis_stand_down.py` | Interrupts in-flight welcome via `welcome.pid`; restores wallpaper; quits apps; clears session file. |
 | `jarvis_holographic_wallpaper.py` | Renders frames + `say` timing for holographic mode. |
 | `wallpaper_util.py` | AppleScript backup / set / restore for desktop pictures. |
-| `jarvis_hud_appkit.py` | Native HUD window (hover reveal, slider) plus optional **`hud_overlay`** windows (background, arc reactor, dictation). |
+| `jarvis_hud_appkit.py` | Native HUD window (hover reveal, slider) plus optional **`hud_overlay`** windows; overlay **alpha follows lab session** (visible when `lab_session.json` is active, hidden after stand down). |
 | `jarvis_hud_slider.py` | Tk slider fallback. |
 | `jarvis_hud_dialog.py` | AppleScript list dialog fallback. |
 | `jarvis_hud_lib.py` | Repo resolution, singleton lock, spawn welcome/stand-down. |
+| `jarvis_doctor.py` | Read-only local diagnostics (config, imports, state, LaunchAgents, HUD runtime vs repo); run via **`jarvis_doctor.sh`**. |
 
 ## Related chapters
 

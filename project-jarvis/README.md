@@ -9,7 +9,8 @@ This folder is a **book-style guide** to the [Jarvis](../README.md) macOS automa
 3. You can trigger welcome with a **double clap**, a **wake phrase** (optional), or the **HUD** (slider or dialog) when the mic is awkward.
 4. While a lab session is active, the background listener listens for **stand-down phrases** (local speech recognition), not new claps.
 5. Everything is driven by **`config/jarvis.json`** and optional state files under **`~/.jarvis/`**.
-6. With the **AppKit HUD** open, optional **`hud_overlay`** layers (grid background, arc reactor, dictation strip) can sit above the desktop; the dictation view reads **`dictation_text.txt`** in your state directory, which **welcome** updates when it runs.
+6. With the **AppKit HUD** open, optional **`hud_overlay`** layers (grid, arc reactor, dictation) are **shown only while a lab session is active** — they fade in after **welcome** succeeds and fade out after **stand down**. They are drawn at **desktop level** (behind normal app windows), so you see them on the **wallpaper**; the **slider** stays above your apps. The dictation strip reads **`dictation_text.txt`**; **welcome** writes it (combined lines) before speaking.
+7. **`./scripts/jarvis_doctor.sh`** prints a **read-only** local report (config resolution, Python imports, state files, LaunchAgents, HUD runtime vs repo) — useful before deep troubleshooting; see [09-installation-and-launchd.md](09-installation-and-launchd.md).
 
 ## Table of contents
 
@@ -23,9 +24,10 @@ This folder is a **book-style guide** to the [Jarvis](../README.md) macOS automa
 | 6 | [06-welcome-and-stand-down.md](06-welcome-and-stand-down.md) | Welcome and stand-down scripts, apps, Spotify |
 | 7 | [07-wallpaper-and-holographic.md](07-wallpaper-and-holographic.md) | Static vs holographic wallpaper, backup/restore |
 | 8 | [08-hud.md](08-hud.md) | AppKit slider, `hud_overlay` chrome, Tk, dialog, login app |
-| 9 | [09-installation-and-launchd.md](09-installation-and-launchd.md) | venv, LaunchAgents, logs, HUD install |
+| 9 | [09-installation-and-launchd.md](09-installation-and-launchd.md) | venv, LaunchAgents, logs, HUD install, **`jarvis_doctor`** |
 | 10 | [10-scripts-inventory.md](10-scripts-inventory.md) | Every script and what it is for |
 | 11 | [11-troubleshooting.md](11-troubleshooting.md) | Symptom → cause → fix |
+| 12 | [12-backlog.md](12-backlog.md) | Possible future work and ideas (not a roadmap) |
 
 ## Where things live in the repo
 

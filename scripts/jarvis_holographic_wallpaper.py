@@ -325,6 +325,12 @@ def play_typing_wallpaper(
     if not hw.get("enabled", False):
         return
 
+    # If the HUD overlay dictation is handling the visual typing, skip wallpaper and just do audio
+    ov = cfg.get("hud_overlay", {})
+    if ov.get("enabled", True) and ov.get("dictation", {}).get("enabled", True):
+        run_cli_say(full_text, voice, cfg)
+        return
+
     scripts_dir = Path(__file__).resolve().parent
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
