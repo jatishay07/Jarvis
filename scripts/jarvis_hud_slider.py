@@ -10,7 +10,16 @@ from __future__ import annotations
 import sys
 import time
 
-from jarvis_hud_lib import acquire_hud_singleton, lab_active, load_cfg, resolve_cfg_path, spawn_stand_down, spawn_welcome
+from jarvis_hud_lib import (
+    acquire_hud_singleton,
+    hands_free_wake_locked,
+    lab_active,
+    load_cfg,
+    resolve_cfg_path,
+    set_hands_free_wake_locked,
+    spawn_stand_down,
+    spawn_welcome,
+)
 
 
 def _raise_window(win: object, *, grab_focus: bool = True) -> None:
@@ -54,7 +63,7 @@ def main() -> int:
     win.configure(bg="#14141a")
     win.resizable(False, False)
 
-    w_win, h_win = 420, 104
+    w_win, h_win = 420, 132
     sw = win.winfo_screenwidth()
     sh = win.winfo_screenheight()
     x = max(0, (sw - w_win) // 2)
@@ -119,6 +128,26 @@ def main() -> int:
     tk.Label(row, text="▶ Stand down", bg="#14141a", fg="#9ae6ff", font=("Helvetica", 10)).pack(
         side=tk.LEFT, padx=(6, 0)
     )
+
+    mute_var = tk.BooleanVar(value=hands_free_wake_locked(cfg))
+
+    def on_mute_toggle() -> None:
+        set_hands_free_wake_locked(cfg, mute_var.get())
+
+    mute_row = tk.Frame(outer, bg="#14141a")
+    mute_row.pack(fill=tk.X, pady=(4, 0))
+    tk.Checkbutton(
+        mute_row,
+        text="Mute clap & wake welcome",
+        variable=mute_var,
+        command=on_mute_toggle,
+        bg="#14141a",
+        fg="#9ae6ff",
+        selectcolor="#1e2430",
+        activebackground="#14141a",
+        activeforeground="#7ee0ff",
+        font=("Helvetica", 10),
+    ).pack(anchor=tk.CENTER)
 
     tk.Label(
         outer,

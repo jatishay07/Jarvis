@@ -11,6 +11,8 @@ from pathlib import Path
 
 _HUD_LOCK_FILE = None
 
+HANDS_FREE_WAKE_LOCK_FILE = "hands_free_wake_lock.json"
+
 
 def repo_root() -> Path:
     env_root = os.environ.get("JARVIS_REPO_ROOT")
@@ -88,6 +90,31 @@ def lab_active(cfg: dict) -> bool:
         return bool(json.loads(sp.read_text(encoding="utf-8")).get("active"))
     except (json.JSONDecodeError, OSError):
         return False
+
+
+def hands_free_wake_locked(cfg: dict) -> bool:
+    """True when double-clap / wake-phrase welcome should be ignored (HUD welcome still allowed)."""
+    path = state_dir(cfg) / HANDS_FREE_WAKE_LOCK_FILE
+    if not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return bool(data.get("locked"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def set_hands_free_wake_locked(cfg: dict, locked: bool) -> None:
+    sd = state_dir(cfg)
+    sd.mkdir(parents=True, exist_ok=True)
+    path = sd / HANDS_FREE_WAKE_LOCK_FILE
+    if not locked:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return
+    path.write_text(json.dumps({"locked": True}, indent=2), encoding="utf-8")
 
 
 def hud_env(cfg_path: Path) -> dict:

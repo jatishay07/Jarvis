@@ -20,6 +20,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 import numpy as np
 
+from jarvis_hud_lib import HANDS_FREE_WAKE_LOCK_FILE, hands_free_wake_locked
 from jarvis_phrase import phrase_matches
 
 
@@ -468,6 +469,7 @@ def run_listener(cfg_path: Path) -> int:
     input_dev = _validate_input_device(sd, _resolve_input_device(cfg, sd))
 
     _lab_clap_warn_t = [0.0]
+    _wake_lock_warn_t = [0.0]
 
     def audio_cb(indata, frames, t, status) -> None:  # type: ignore[no-untyped-def]
         if status:
@@ -624,6 +626,19 @@ def run_listener(cfg_path: Path) -> int:
                             flush=True,
                         )
                     continue
+                if hands_free_wake_locked(cfg):
+                    clap.reset_arm()
+                    if now - _wake_lock_warn_t[0] > 25.0:
+                        _wake_lock_warn_t[0] = now
+                        lp = state_dir / HANDS_FREE_WAKE_LOCK_FILE
+                        print(
+                            "\n[clap] Double-clap ignored — hands-free welcome is muted. "
+                            "Toggle off via Jarvis HUD: right-click the slider → "
+                            '"Mute clap & wake welcome".\n'
+                            f"        Lock file: {lp}\n",
+                            flush=True,
+                        )
+                    continue
                 print("Double-clap detected → welcome routine.", flush=True)
                 if run_welcome(cfg_path):
                     phrase_buf.clear()
@@ -674,6 +689,18 @@ def run_listener(cfg_path: Path) -> int:
                             print(f"[wake] Heard: {text!r}", flush=True)
 
                         if phrase_matches(text, wake_phrases, fuzzy_ratio=phrase_fuzzy):
+                            wl_now = time.time()
+                            if hands_free_wake_locked(cfg):
+                                if wl_now - _wake_lock_warn_t[0] > 25.0:
+                                    _wake_lock_warn_t[0] = wl_now
+                                    lp = state_dir / HANDS_FREE_WAKE_LOCK_FILE
+                                    print(
+                                        "\n[wake] Wake phrase ignored — hands-free welcome is muted. "
+                                        "Toggle off via Jarvis HUD (right-click the slider).\n"
+                                        f"        Lock file: {lp}\n",
+                                        flush=True,
+                                    )
+                                continue
                             print("Wake phrase detected → welcome routine.", flush=True)
                             if run_welcome(cfg_path):
                                 wake_buf.clear()

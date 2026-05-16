@@ -4,7 +4,8 @@ Glass hover-only Manual Control HUD (AppKit).
 
 Borderless top strip: pointer within ``hover_zone_px`` of the top of the visible desktop
 can reveal a centered 340×58 liquid-glass track with a slim elliptical knob.
-No title bar or label chrome. Right-click the control for Quit.
+No title bar or label chrome. Right-click the control for mute (clap/wake)
+and Quit.
 
 Semantics: knob **left** = standby / stand down, **right** = operational / welcome (when lab inactive).
 Animations use NSAnimationContext / Core Animation — no NSTimer / performSelector on the delegate.
@@ -21,7 +22,16 @@ import traceback
 from ctypes import c_double
 from pathlib import Path
 
-from jarvis_hud_lib import acquire_hud_singleton, lab_active, load_cfg, resolve_cfg_path, spawn_stand_down, spawn_welcome
+from jarvis_hud_lib import (
+    acquire_hud_singleton,
+    hands_free_wake_locked,
+    lab_active,
+    load_cfg,
+    resolve_cfg_path,
+    set_hands_free_wake_locked,
+    spawn_stand_down,
+    spawn_welcome,
+)
 
 try:
     import Quartz  # noqa: F401 — registers CGColorRef bridge so .CGColor() returns a proper CFType
@@ -96,6 +106,12 @@ except ImportError:
 
 if _HAVE_COCOA:
     import objc
+
+    try:
+        from Cocoa import NSControlStateValueOff, NSControlStateValueOn  # type: ignore[import-not-found]
+    except ImportError:
+        NSControlStateValueOn = 1
+        NSControlStateValueOff = 0
 
     _HUD_BUILD_ID = "appkit-figma-floating-control-2026-04-04zb"
     _DEBUG_VISIBILITY_MODES = {"normal", "always_visible", "titled_debug"}
@@ -701,6 +717,17 @@ if _HAVE_COCOA:
             from Cocoa import NSApp  # type: ignore[import-not-found]
 
             menu = NSMenu.alloc().init()
+            deleg = self._delegate
+            if deleg is not None and getattr(deleg, "_cfg", None) is not None:
+                locked = hands_free_wake_locked(deleg._cfg)
+                mute_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    "Mute clap & wake welcome",
+                    "toggleHandsFreeWakeMute:",
+                    "",
+                )
+                mute_item.setTarget_(deleg)
+                mute_item.setState_(NSControlStateValueOn if locked else NSControlStateValueOff)
+                menu.addItem_(mute_item)
             quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Quit Jarvis HUD",
                 "terminate:",
@@ -855,6 +882,20 @@ if _HAVE_COCOA:
                     _ns_color((0.0, 0.72, 1.0, _lerp(0.45, 0.60, glow_pulse) * t)).setFill()
                     glow_shape.fill()
                     NSGraphicsContext.currentContext().restoreGraphicsState()
+
+                # Amber wash when clap/wake welcome is muted (hands_free_wake_lock.json)
+                locked = False
+                deleg = self._delegate
+                if deleg is not None:
+                    try:
+                        locked = bool(deleg.handsFreeWakeLocked())
+                    except Exception:
+                        locked = False
+                if locked:
+                    mute_rect = NSMakeRect(TRACK_X - 2, TRACK_Y + TRACK_PILL_INSET_Y - 2, TRACK_W + 4, TRACK_PILL_H + 4)
+                    mute_shell = _rounded_rect(mute_rect, mute_rect.size.height / 2.0)
+                    _ns_color((0.92, 0.48, 0.05, 0.18)).setFill()
+                    mute_shell.fill()
             except Exception:
                 _log_view_exception("slider drawRect")
 
@@ -1798,6 +1839,18 @@ if _HAVE_COCOA:
                 spawn_stand_down(self._cfg_path)
                 self._last_fire = now
             self._update_track_glow(float(new))
+
+        def handsFreeWakeLocked(self) -> bool:  # noqa: N802
+            if self._cfg is None:
+                return False
+            return hands_free_wake_locked(self._cfg)
+
+        def toggleHandsFreeWakeMute_(self, _sender) -> None:  # noqa: N802
+            if self._cfg is None:
+                return
+            set_hands_free_wake_locked(self._cfg, not hands_free_wake_locked(self._cfg))
+            if self._slider is not None:
+                self._slider.setNeedsDisplay_(True)
 
         def _make_overlay_window(self, frame):
             """Create a borderless, non-interactive, always-on-top overlay window."""
